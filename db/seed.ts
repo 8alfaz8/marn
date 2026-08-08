@@ -24,9 +24,9 @@ const BASE: Record<string, number> = {
 };
 
 const COACHES = [
-  { id: 'c1', name: 'Sara Haddad',  initials: 'SH', title: 'Lead Flexologist' },
-  { id: 'c2', name: 'Omar Nasser',  initials: 'ON', title: 'Flexologist' },
-  { id: 'c3', name: 'Lina Farouk',  initials: 'LF', title: 'Flexologist' },
+  { id: 'c1', name: 'Sara Haddad',   initials: 'SH', title: 'Lead Flexologist' },
+  { id: 'c2', name: 'Omar Nasser',   initials: 'ON', title: 'Flexologist' },
+  { id: 'c3', name: 'Lina Farouk',   initials: 'LF', title: 'Flexologist' },
 ];
 
 const MOVES = [
@@ -56,7 +56,7 @@ async function wipe() {
 
 export async function seed() {
   await wipe();
-  await db.insert(coaches).values(COACHES.map((c) => ({ ...c, siteId: 's1', isDemo: true })));
+  await db.insert(coaches).values(COACHES.map((c) => ({ ...c, siteId: 's1', isDemo: true })) as any);
 
   /* ---- members ---------------------------------------------------------- */
   await db.insert(members).values([
@@ -69,12 +69,12 @@ export async function seed() {
     { id: 'm_tom', name: 'Tom Whitfield', phone: '+971 56 771 2094', goal: 'Lower back stiffness after long drives',
       persona: 'new', joinedAt: iso(T0), credits: 0, streak: 0, wearable: null,
       parqCleared: false, parqAt: null, isDemo: true },
-  ]);
+  ] as any);
 
   await db.insert(flags).values([
     { id: 'fl_1', memberId: 'm_amira', text: 'Right shoulder impingement — avoid end-range overhead loading.', since: iso(addDays(T0, -56)) },
     { id: 'fl_2', memberId: 'm_tom', text: 'PAR-Q not completed. Screen before first session.', since: iso(T0) },
-  ]);
+  ] as any);
 
   /* ---- assessments ------------------------------------------------------ */
   // Layla: 12 assessments over 9 months. Fast gains, plateau, second climb.
@@ -99,8 +99,8 @@ export async function seed() {
     measuresFor(g).forEach((m) => amiraMs.push({ assessmentId: id, memberId: 'm_amira', ...m }));
   });
 
-  await db.insert(assessments).values([...laylaAs, ...amiraAs]);
-  await db.insert(measurements).values([...laylaMs, ...amiraMs]);
+  await db.insert(assessments).values([...laylaAs, ...amiraAs] as any);
+  await db.insert(measurements).values([...laylaMs, ...amiraMs] as any);
 
   /* ---- sessions --------------------------------------------------------- */
   const sess: any[] = [];
@@ -131,7 +131,7 @@ export async function seed() {
       coachNotes: 'Full-body pass. Thoracic rotation limited both directions. Boots 15 min after.',
       memberSummary: 'Full-body session with compression boots to finish. Your mid-back is the limiter on overhead reach — that is our focus for the next block.' },
   );
-  await db.insert(sessions).values(sess);
+  await db.insert(sessions).values(sess as any);
 
   /* ---- programmes ------------------------------------------------------- */
   await db.insert(programs).values([
@@ -139,7 +139,7 @@ export async function seed() {
       moves: MOVES, completions: [...Array(6)].map((_, i) => iso(addDays(T0, -(i + 1)))) },
     { id: 'pg_amira', memberId: 'm_amira', coachId: 'c1', title: 'Desk Reset — Block 2', assignedAt: iso(addDays(T0, -4)),
       moves: MOVES.slice(0, 3), completions: [iso(addDays(T0, -3)), iso(addDays(T0, -2))] },
-  ]);
+  ] as any);
 
   /* ---- bookings --------------------------------------------------------- */
   const bk = (id: string, memberId: string, coachId: string | null, sid: string, d: Date, time: string, status: string, addons: string[] = []) => ({
@@ -151,11 +151,11 @@ export async function seed() {
     bk('bk_2', 'm_amira', null, 'st30', T0, '11:30', 'requested'),
     bk('bk_3', 'm_layla', 'c2', 'cb30', addDays(T0, 2), '18:00', 'confirmed'),
     bk('bk_4', 'm_amira', 'c1', 'st30', addDays(T0, 1), '18:00', 'confirmed'),
-  ]);
+  ] as any);
 
   await db.insert(checkins).values([
     { id: 'ck_1', memberId: 'm_layla', sleep: 4, pain: 3, areas: ['right hip'], note: 'Long run yesterday, hip is stiff.' },
-  ]);
+  ] as any);
 
   /* ---- score history ---------------------------------------------------- */
   const rows: any[] = [];
@@ -175,7 +175,7 @@ export async function seed() {
   };
   addSeries('m_layla', 90, (t) => 0.37 + t * 0.25, true, 41);
   addSeries('m_amira', 60, (t) => 0.10 + t * 0.08, false, 5);
-  await db.insert(scoreDays).values(rows);
+  await db.insert(scoreDays).values(rows as any);
 
   return { coaches: COACHES.length, members: 3, sessions: sess.length, assessments: laylaAs.length + amiraAs.length };
 }

@@ -115,7 +115,7 @@ async function refreshScoreDay(memberId: string) {
   });
   const id = `sd_${memberId}_today`;
   await db.delete(scoreDays).where(and(eq(scoreDays.memberId, memberId), eq(scoreDays.date, todayIso())));
-  await db.insert(scoreDays).values({ id, memberId, date: todayIso(), ...sc });
+  await db.insert(scoreDays).values({ id, memberId, date: todayIso(), ...sc } as any);
 }
 
 /* ---------- dispatcher ---------- */
@@ -154,9 +154,9 @@ async function handle(verb: string, seg: string[], q: URLSearchParams, body: any
       persona: 'custom', joinedAt: todayIso(), credits: body.credits ?? 0, streak: 0,
       wearable: body.wearable || null, parqCleared: !!body.parqCleared,
       parqAt: body.parqCleared ? todayIso() : null, isDemo: false,
-    });
+    } as any);
     if (!body.parqCleared) {
-      await db.insert(flags).values({ id: uid('fl'), memberId: id, text: 'PAR-Q not completed. Screen before first session.', since: todayIso() });
+      await db.insert(flags).values({ id: uid('fl'), memberId: id, text: 'PAR-Q not completed. Screen before first session.', since: todayIso() } as any);
     }
     return { memberId: id, created: true, note: 'Member starts with no assessment — this is the empty state.' };
   }
@@ -165,12 +165,12 @@ async function handle(verb: string, seg: string[], q: URLSearchParams, body: any
     if (!body.name?.trim()) bad('Name is required');
     const id = uid('c');
     const initials = body.name.trim().split(/\s+/).map((x: string) => x[0]).join('').slice(0, 2).toUpperCase();
-    await db.insert(coaches).values({ id, name: body.name.trim(), initials, title: body.title || 'Flexologist', siteId: 's1', isDemo: false });
+    await db.insert(coaches).values({ id, name: body.name.trim(), initials, title: body.title || 'Flexologist', siteId: 's1', isDemo: false } as any);
     return { coachId: id, created: true };
   }
 
   if (verb === 'POST' && seg[0] === 'members' && seg[2] === 'parq') {
-    await db.update(members).set({ parqCleared: !!body.cleared, parqAt: todayIso() }).where(eq(members.id, seg[1]));
+    await db.update(members).set({ parqCleared: !!body.cleared, parqAt: todayIso() } as any).where(eq(members.id, seg[1]));
     if (body.cleared) {
       const fs = await db.select().from(flags).where(eq(flags.memberId, seg[1]));
       const parqFlags = fs.filter((f) => /PAR-Q/i.test(f.text)).map((f) => f.id);
@@ -181,7 +181,7 @@ async function handle(verb: string, seg: string[], q: URLSearchParams, body: any
 
   if (verb === 'POST' && seg[0] === 'members' && seg[2] === 'flags') {
     const id = uid('fl');
-    await db.insert(flags).values({ id, memberId: seg[1], text: body.text, since: todayIso() });
+    await db.insert(flags).values({ id, memberId: seg[1], text: body.text, since: todayIso() } as any);
     return { flag: { id, text: body.text } };
   }
   if (verb === 'DELETE' && seg[0] === 'members' && seg[2] === 'flags') {
@@ -190,7 +190,7 @@ async function handle(verb: string, seg: string[], q: URLSearchParams, body: any
   }
 
   if (verb === 'POST' && seg[0] === 'members' && seg[2] === 'wearable') {
-    await db.update(members).set({ wearable: body.provider }).where(eq(members.id, seg[1]));
+    await db.update(members).set({ wearable: body.provider } as any).where(eq(members.id, seg[1]));
     await refreshScoreDay(seg[1]);
     return { provider: body.provider, linked: true, scopes: ['hrv', 'sleep', 'strain'] };
   }
@@ -206,20 +206,20 @@ async function handle(verb: string, seg: string[], q: URLSearchParams, body: any
     const addons: string[] = body.addons || [];
     const aed = sv.aed + addons.reduce((s, a) => s + addon(a).aed, 0);
     const id = uid('bk');
-    await db.insert(bookings).values({ id, memberId: m.id, coachId: null, serviceId: sv.id, date: body.date, time: body.time, status: 'requested', addons, aed });
+    await db.insert(bookings).values({ id, memberId: m.id, coachId: null, serviceId: sv.id, date: body.date, time: body.time, status: 'requested', addons, aed } as any);
     return { booking: { id, status: 'requested', aed }, message: 'Request sent to the studio' };
   }
 
   if (verb === 'POST' && seg[0] === 'bookings' && seg[2] === 'confirm') {
-    await db.update(bookings).set({ status: 'confirmed', coachId: body.coachId || 'c1' }).where(eq(bookings.id, seg[1]));
+    await db.update(bookings).set({ status: 'confirmed', coachId: body.coachId || 'c1' } as any).where(eq(bookings.id, seg[1]));
     return { bookingId: seg[1], status: 'confirmed', notified: ['push', 'whatsapp'] };
   }
   if (verb === 'POST' && seg[0] === 'bookings' && seg[2] === 'decline') {
-    await db.update(bookings).set({ status: 'cancelled' }).where(eq(bookings.id, seg[1]));
+    await db.update(bookings).set({ status: 'cancelled' } as any).where(eq(bookings.id, seg[1]));
     return { bookingId: seg[1], status: 'cancelled', reason: body.reason || 'Studio unavailable', notified: ['push', 'whatsapp'] };
   }
   if (verb === 'DELETE' && seg[0] === 'bookings') {
-    await db.update(bookings).set({ status: 'cancelled' }).where(eq(bookings.id, seg[1]));
+    await db.update(bookings).set({ status: 'cancelled' } as any).where(eq(bookings.id, seg[1]));
     return { bookingId: seg[1], status: 'cancelled' };
   }
 
@@ -228,8 +228,8 @@ async function handle(verb: string, seg: string[], q: URLSearchParams, body: any
     const { measurements: prev } = await latestMeasurements(body.memberId);
     const norm = simulateDeviceRead(prev.length ? prev : null);
     const id = uid('as');
-    await db.insert(assessments).values({ id, memberId: body.memberId, coachId: body.coachId || 'c1', capturedAt: todayIso(), source: norm.source, deviceId: norm.deviceId });
-    await db.insert(measurements).values(norm.measurements.map((m) => ({ assessmentId: id, memberId: body.memberId, ...m })));
+    await db.insert(assessments).values({ id, memberId: body.memberId, coachId: body.coachId || 'c1', capturedAt: todayIso(), source: norm.source, deviceId: norm.deviceId } as any);
+    await db.insert(measurements).values(norm.measurements.map((m) => ({ assessmentId: id, memberId: body.memberId, ...m })) as any);
     await refreshScoreDay(body.memberId);
     return { assessmentId: id, source: 'bodymap', deviceId: norm.deviceId, ingestedVia: 'adapter/bodymap-simulated', measurementCount: norm.measurements.length };
   }
@@ -237,8 +237,8 @@ async function handle(verb: string, seg: string[], q: URLSearchParams, body: any
   if (verb === 'POST' && seg[0] === 'members' && seg[2] === 'assessments') {
     const norm = fromManualEntry(body.measurements);
     const id = uid('as');
-    await db.insert(assessments).values({ id, memberId: seg[1], coachId: body.coachId || 'c1', capturedAt: todayIso(), source: 'manual', deviceId: null });
-    await db.insert(measurements).values(norm.measurements.map((m) => ({ assessmentId: id, memberId: seg[1], ...m })));
+    await db.insert(assessments).values({ id, memberId: seg[1], coachId: body.coachId || 'c1', capturedAt: todayIso(), source: 'manual', deviceId: null } as any);
+    await db.insert(measurements).values(norm.measurements.map((m) => ({ assessmentId: id, memberId: seg[1], ...m })) as any);
     await refreshScoreDay(seg[1]);
     return { assessmentId: id, source: 'manual', measurementCount: norm.measurements.length };
   }
@@ -254,9 +254,9 @@ async function handle(verb: string, seg: string[], q: URLSearchParams, body: any
       completedAt: todayIso(), mins: body.mins, modalities: body.modalities || [],
       rpe: body.rpe, painBefore: body.painBefore, painAfter: body.painAfter,
       coachNotes: body.coachNotes || null, memberSummary: body.memberSummary,
-    });
-    if (body.bookingId) await db.update(bookings).set({ status: 'completed' }).where(eq(bookings.id, body.bookingId));
-    await db.update(members).set({ credits: Math.max(m.credits - 1, 0), streak: m.streak + 1 }).where(eq(members.id, m.id));
+    } as any);
+    if (body.bookingId) await db.update(bookings).set({ status: 'completed' } as any).where(eq(bookings.id, body.bookingId));
+    await db.update(members).set({ credits: Math.max(m.credits - 1, 0), streak: m.streak + 1 } as any).where(eq(members.id, m.id));
     await refreshScoreDay(m.id);
     return { sessionId: id, creditsRemaining: Math.max(m.credits - 1, 0), notified: ['push'] };
   }
@@ -264,20 +264,20 @@ async function handle(verb: string, seg: string[], q: URLSearchParams, body: any
   /* --- programmes & check-ins --- */
   if (verb === 'POST' && seg[0] === 'members' && seg[2] === 'programs') {
     const id = uid('pg');
-    await db.insert(programs).values({ id, memberId: seg[1], coachId: body.coachId || 'c1', title: body.title, assignedAt: todayIso(), moves: body.moves || [], completions: [] });
+    await db.insert(programs).values({ id, memberId: seg[1], coachId: body.coachId || 'c1', title: body.title, assignedAt: todayIso(), moves: body.moves || [], completions: [] } as any);
     return { programId: id, notified: ['push'] };
   }
   if (verb === 'POST' && seg[0] === 'programs' && seg[2] === 'complete') {
     const [pg] = await db.select().from(programs).where(eq(programs.id, seg[1]));
     if (!pg) bad('Programme not found', 404);
     const done = new Set(pg.completions); done.add(todayIso());
-    await db.update(programs).set({ completions: [...done] }).where(eq(programs.id, pg.id));
+    await db.update(programs).set({ completions: [...done] } as any).where(eq(programs.id, pg.id));
     await refreshScoreDay(pg.memberId);
     return { programId: pg.id, completions: [...done] };
   }
   if (verb === 'POST' && p === 'checkins') {
     const id = uid('ck');
-    await db.insert(checkins).values({ id, memberId: body.memberId, sleep: body.sleep, pain: body.pain, areas: body.areas || [], note: body.note || null });
+    await db.insert(checkins).values({ id, memberId: body.memberId, sleep: body.sleep, pain: body.pain, areas: body.areas || [], note: body.note || null } as any);
     return { checkinId: id, visibleToCoach: true };
   }
 
