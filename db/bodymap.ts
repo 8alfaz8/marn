@@ -1,4 +1,4 @@
-import { MUSCLES, clamp } from '../reference';
+import { MUSCLES, clamp } from './reference';
 
 /* ---------------------------------------------------------------------------
    BodyMap anti-corruption layer.
