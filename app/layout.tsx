@@ -16,6 +16,13 @@ export const metadata: Metadata = {
 };
 export const viewport: Viewport = {
   width: 'device-width', initialScale: 1, themeColor: '#10130E', viewportFit: 'cover',
+  // The app is light-only (no dark palette built yet — theme.ts palette.mode
+  // is fixed 'light'). Without this, phones with system dark mode on apply
+  // their browser's forced/auto-dark heuristic to the page, which shifts the
+  // hardcoded status colours (restricted/limited/optimal/excellent) on the
+  // body map away from their real hex values. Desktop browsers rarely force
+  // this, which is why it only showed up on mobile.
+  colorScheme: 'light',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

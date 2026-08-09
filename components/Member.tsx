@@ -17,12 +17,14 @@ import List from '@mui/material/List';
 import ListItemButton from '@mui/material/ListItemButton';
 import Paper from '@mui/material/Paper';
 import Stack from '@mui/material/Stack';
+import Tab from '@mui/material/Tab';
 import Table from '@mui/material/Table';
 import TableBody from '@mui/material/TableBody';
 import TableCell from '@mui/material/TableCell';
 import TableContainer from '@mui/material/TableContainer';
 import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
+import Tabs from '@mui/material/Tabs';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import Typography from '@mui/material/Typography';
@@ -91,6 +93,7 @@ const EMPTY_SNAP = {
 };
 
 const fmtDate = (d: string) => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 const signed = (n: number) => `${n >= 0 ? '+' : ''}${n}`;
 /* Measured change, not sentiment: jade for gained range, clay for lost. */
 const changeColor = (n: number) => (n >= 0 ? 'success.main' : 'error.main');
@@ -173,8 +176,8 @@ export default function Member({ memberId }: { memberId: string }) {
 
   const [tab, setTab] = useState<TabKey>('today');
   const [sel, setSel] = useState('hamstrings');
-  const [face, setFace] = useState<'front' | 'back'>('back');
   const [metric, setMetric] = useState<Metric>('flexibility');
+  const [progressView, setProgressView] = useState<'scores' | 'history'>('scores');
   const [draft, setDraft] = useState<{ svc: string; date: string; slot: string | null; addons: string[] }>(
     { svc: 'st30', date: todayIso(), slot: null, addons: [] });
   const [slots, setSlots] = useState<any[]>([]);
@@ -303,95 +306,97 @@ export default function Member({ memberId }: { memberId: string }) {
 
         {parqCallout()}
 
-        {next ? (
-          <Paper variant="outlined" sx={{ p: 2.5 }}>
-            <Stack direction="row" spacing={1} sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
-              <Eyebrow>Next session</Eyebrow>
-              <Chip size="small" label={next.status} color={statusChipColor(next.status)} />
-            </Stack>
-            <Typography variant="h5" sx={{ mt: 1 }}>{service(next.serviceId).name}</Typography>
-            <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
-              {fmtDate(next.date)} · {next.time} · {service(next.serviceId).mins} min · {coachName(next.coachId)}
-            </Typography>
-            <Stack direction="row" spacing={1} sx={{ mt: 2, flexWrap: 'wrap' }}>
-              <Button variant="outlined" onClick={() => setCheckinOpen(true)}>
-                Pre-session check-in
-              </Button>
-              <Button
-                variant="text"
-                onClick={() => act(api('DELETE', `/bookings/${next.id}`, undefined, 'MEMBER'), 'Session cancelled')}
-              >
-                Cancel
-              </Button>
-            </Stack>
-          </Paper>
-        ) : (
-          <Paper variant="outlined" sx={{ p: 2.5 }}>
-            <Eyebrow>Nothing booked</Eyebrow>
-            <Typography variant="h5" sx={{ mt: 1, mb: 2 }}>
-              {sessions.length ? `Your last session was ${fmtDate(sessions[0].completedAt)}.` : 'Book your first session.'}
-            </Typography>
-            <Button variant="contained" onClick={() => setTab('book')}>Book a session</Button>
-          </Paper>
-        )}
-
-        {priority.length > 0 && (
-          <Paper variant="outlined" sx={{ p: 2.5 }}>
-            <Stack direction="row" spacing={1} sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
-              <Eyebrow>Priority areas today</Eyebrow>
-              <Button variant="text" size="small" onClick={() => setTab('body')}>Full body map</Button>
-            </Stack>
-            <List disablePadding sx={{ mt: 1 }}>
-              {priority.map((p: any) => (
-                <ListItemButton
-                  key={p.muscleKey}
-                  onClick={() => { setSel(p.muscleKey); setFace(muscle(p.muscleKey).face); setTab('body'); }}
-                  sx={{ px: 1, gap: 2 }}
+        <Stack spacing={2.5} divider={<Divider />}>
+          {next ? (
+            <Box>
+              <Stack direction="row" spacing={1} sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
+                <Eyebrow>Next session</Eyebrow>
+                <Chip size="small" label={next.status} color={statusChipColor(next.status)} />
+              </Stack>
+              <Typography variant="h5" sx={{ mt: 1 }}>{service(next.serviceId).name}</Typography>
+              <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
+                {fmtDate(next.date)} · {next.time} · {service(next.serviceId).mins} min · {coachName(next.coachId)}
+              </Typography>
+              <Stack direction="row" spacing={1} sx={{ mt: 2, flexWrap: 'wrap' }}>
+                <Button variant="outlined" onClick={() => setCheckinOpen(true)}>
+                  Pre-session check-in
+                </Button>
+                <Button
+                  variant="text"
+                  onClick={() => act(api('DELETE', `/bookings/${next.id}`, undefined, 'MEMBER'), 'Session cancelled')}
                 >
-                  <Box sx={{ width: 4, alignSelf: 'stretch', borderRadius: 1, bgcolor: colorOf(p.pct) }} />
-                  <Box sx={{ flex: 1 }}>
-                    <Typography variant="subtitle2">{muscle(p.muscleKey).label}</Typography>
-                    <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                      {muscle(p.muscleKey).region} · {Math.round(p.pct * 100)}% of target arc
-                    </Typography>
-                  </Box>
-                  <Typography variant="readout" sx={{ fontSize: '1.125rem' }}>{p.degrees}°</Typography>
-                </ListItemButton>
-              ))}
-            </List>
-          </Paper>
-        )}
+                  Cancel
+                </Button>
+              </Stack>
+            </Box>
+          ) : (
+            <Box>
+              <Eyebrow>Nothing booked</Eyebrow>
+              <Typography variant="h5" sx={{ mt: 1, mb: 2 }}>
+                {sessions.length ? `Your last session was ${fmtDate(sessions[0].completedAt)}.` : 'Book your first session.'}
+              </Typography>
+              <Button variant="contained" onClick={() => setTab('book')}>Book a session</Button>
+            </Box>
+          )}
 
-        <Paper variant="outlined" sx={{ p: 2.5 }}>
-          <Eyebrow>Data streams</Eyebrow>
-          <Typography variant="h5" sx={{ mt: 1 }}>
-            {me.wearable ? `Connected — ${me.wearable}` : 'Sharpen your recovery score'}
-          </Typography>
-          <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
-            Add heart-rate variability, sleep and strain from your wearable. Recovery becomes measured rather than estimated.
-          </Typography>
-          <Stack direction="row" spacing={2} sx={{ mt: 1, flexWrap: 'wrap' }}>
-            {[{ id: 'whoop', label: 'Whoop' }, { id: 'apple', label: 'Apple Health' }].map((p) => {
-              const on = me.wearable === p.id;
-              return (
-                <FormControlLabel
-                  key={p.id}
-                  label={p.label}
-                  control={
-                    <Checkbox
-                      checked={on}
-                      disabled={on}
-                      onChange={() => act(
-                        api('POST', `/members/${memberId}/wearable`, { provider: p.id }, 'MEMBER'),
-                        `${p.label} connected`,
-                      )}
-                    />
-                  }
-                />
-              );
-            })}
-          </Stack>
-        </Paper>
+          {priority.length > 0 && (
+            <Box>
+              <Stack direction="row" spacing={1} sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
+                <Eyebrow>Priority areas today</Eyebrow>
+                <Button variant="text" size="small" onClick={() => setTab('body')}>Full body map</Button>
+              </Stack>
+              <List disablePadding sx={{ mt: 1 }}>
+                {priority.map((p: any) => (
+                  <ListItemButton
+                    key={p.muscleKey}
+                    onClick={() => { setSel(p.muscleKey); setTab('body'); }}
+                    sx={{ px: 1, gap: 2 }}
+                  >
+                    <Box sx={{ width: 4, alignSelf: 'stretch', borderRadius: 1, bgcolor: colorOf(p.pct) }} />
+                    <Box sx={{ flex: 1 }}>
+                      <Typography variant="subtitle2">{muscle(p.muscleKey).label}</Typography>
+                      <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                        {muscle(p.muscleKey).region} · {Math.round(p.pct * 100)}% of target arc
+                      </Typography>
+                    </Box>
+                    <Typography variant="readout" sx={{ fontSize: '1.125rem' }}>{p.degrees}°</Typography>
+                  </ListItemButton>
+                ))}
+              </List>
+            </Box>
+          )}
+
+          <Box>
+            <Eyebrow>Data streams</Eyebrow>
+            <Typography variant="h5" sx={{ mt: 1 }}>
+              {me.wearable ? `Connected — ${me.wearable}` : 'Sharpen your recovery score'}
+            </Typography>
+            <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
+              Add heart-rate variability, sleep and strain from your wearable. Recovery becomes measured rather than estimated.
+            </Typography>
+            <Stack direction="row" spacing={2} sx={{ mt: 1, flexWrap: 'wrap' }}>
+              {[{ id: 'whoop', label: 'Whoop' }, { id: 'apple', label: 'Apple Health' }].map((p) => {
+                const on = me.wearable === p.id;
+                return (
+                  <FormControlLabel
+                    key={p.id}
+                    label={p.label}
+                    control={
+                      <Checkbox
+                        checked={on}
+                        disabled={on}
+                        onChange={() => act(
+                          api('POST', `/members/${memberId}/wearable`, { provider: p.id }, 'MEMBER'),
+                          `${p.label} connected`,
+                        )}
+                      />
+                    }
+                  />
+                );
+              })}
+            </Stack>
+          </Box>
+        </Stack>
       </Stack>
     );
   };
@@ -421,21 +426,22 @@ export default function Member({ memberId }: { memberId: string }) {
         />
 
         <InkPanel>
-          <Stack direction="row" spacing={1} sx={{ mb: 1, alignItems: 'center', justifyContent: 'space-between' }}>
-            <Eyebrow onInk>Whole-body map</Eyebrow>
-            <ToggleButtonGroup
-              size="small"
-              exclusive
-              value={face}
-              onChange={(_, v) => v && setFace(v)}
-              sx={{ '& .MuiToggleButton-root': { color: 'primary.contrastText', borderColor: 'primary.light' } }}
-            >
-              <ToggleButton value="front">Front</ToggleButton>
-              <ToggleButton value="back">Back</ToggleButton>
-            </ToggleButtonGroup>
-          </Stack>
-          <BodyMap face={face} measurements={meas} selected={sel} onSelect={setSel} />
-          <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: 'wrap', justifyContent: 'center' }}>
+          <Eyebrow onInk>Whole-body map</Eyebrow>
+          <Grid container spacing={1.5} sx={{ mt: 0.5 }}>
+            <Grid size={6}>
+              <Typography variant="overline" align="center" sx={{ display: 'block', color: 'primary.contrastText', opacity: 0.62 }}>
+                Front
+              </Typography>
+              <BodyMap face="front" measurements={meas} selected={sel} onSelect={setSel} />
+            </Grid>
+            <Grid size={6}>
+              <Typography variant="overline" align="center" sx={{ display: 'block', color: 'primary.contrastText', opacity: 0.62 }}>
+                Back
+              </Typography>
+              <BodyMap face="back" measurements={meas} selected={sel} onSelect={setSel} />
+            </Grid>
+          </Grid>
+          <Stack direction="row" spacing={1} sx={{ mt: 1.5, flexWrap: 'wrap', justifyContent: 'center' }}>
             {[
               { k: 'restricted', p: 0.4 }, { k: 'limited', p: 0.7 },
               { k: 'optimal', p: 0.8 }, { k: 'excellent', p: 0.95 },
@@ -448,9 +454,9 @@ export default function Member({ memberId }: { memberId: string }) {
               />
             ))}
           </Stack>
-        </InkPanel>
 
-        <InkPanel>
+          <Divider sx={{ my: 2.5, borderColor: 'primary.light' }} />
+
           <Grid container spacing={2} sx={{ alignItems: 'center' }}>
             <Grid size={{ xs: 12, sm: 7 }}>
               <Eyebrow onInk>{info.region} region</Eyebrow>
@@ -490,7 +496,7 @@ export default function Member({ memberId }: { memberId: string }) {
                       key={mu.key}
                       hover
                       selected={sel === mu.key}
-                      onClick={() => { setSel(mu.key); setFace(mu.face); }}
+                      onClick={() => setSel(mu.key)}
                       sx={{ cursor: 'pointer' }}
                     >
                       <TableCell>
@@ -529,13 +535,11 @@ export default function Member({ memberId }: { memberId: string }) {
       </Box>
     );
 
-    return (
+    const renderScores = () => (
       <Stack spacing={2}>
-        <PageTitle eyebrow={`Longitudinal · ${series.length} days on record`} title="Progress" />
-
         <Paper variant="outlined" sx={{ p: 2.5 }}>
           <ToggleButtonGroup size="small" exclusive value={metric} onChange={(_, v) => v && setMetric(v)}>
-            {METRICS.map((k) => <ToggleButton key={k} value={k}>{k}</ToggleButton>)}
+            {METRICS.map((k) => <ToggleButton key={k} value={k}>{cap(k)}</ToggleButton>)}
           </ToggleButtonGroup>
 
           <Stack direction="row" spacing={4} sx={{ mt: 2 }}>
@@ -564,13 +568,11 @@ export default function Member({ memberId }: { memberId: string }) {
               hideLegend
               series={[{
                 data: series.map((x: any) => x[metric] as number),
-                label: metric,
-                area: true,
+                label: cap(metric),
                 showMark: false,
                 curve: 'monotoneX',
                 color: METRIC_COLOR[metric](theme),
               }]}
-              sx={{ '& .MuiAreaElement-root': { fillOpacity: 0.18 } }}
             />
           ) : (
             <Box sx={{ mt: 2 }}>
@@ -595,7 +597,7 @@ export default function Member({ memberId }: { memberId: string }) {
               grid={{ horizontal: true }}
               series={METRICS.map((k) => ({
                 data: series.map((x: any) => x[k] as number),
-                label: k,
+                label: cap(k),
                 showMark: false,
                 curve: 'monotoneX',
                 color: METRIC_COLOR[k](theme),
@@ -603,28 +605,41 @@ export default function Member({ memberId }: { memberId: string }) {
             />
           </Paper>
         )}
+      </Stack>
+    );
 
-        <Paper variant="outlined" sx={{ p: 2.5 }}>
-          <Eyebrow>Session history · {sessions.length} logged</Eyebrow>
-          <Stack spacing={1.5} sx={{ mt: 1.5 }}>
-            {sessions.length ? sessions.slice(0, 8).map((x: any) => (
-              <Paper key={x.id} variant="outlined" sx={{ p: 2, bgcolor: 'background.default' }}>
-                <Stack direction="row" spacing={1} sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
-                  <Typography variant="subtitle2">{x.mins} min · {x.modalities.join(' + ')}</Typography>
-                  <Typography variant="overline" sx={{ color: 'text.secondary' }}>{x.completedAt}</Typography>
-                </Stack>
-                <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
-                  {coachName(x.coachId)} · RPE {x.rpe} · pain {x.painBefore}→{x.painAfter}
-                </Typography>
-                <Typography variant="body2" sx={{ mt: 1 }}>{x.memberSummary}</Typography>
-              </Paper>
-            )) : (
-              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                No sessions yet. Your coach&apos;s summary appears here after the first one.
-              </Typography>
-            )}
-          </Stack>
-        </Paper>
+    const renderHistory = () => (
+      <Stack spacing={1.5}>
+        <Eyebrow>{sessions.length} session{sessions.length === 1 ? '' : 's'} logged</Eyebrow>
+        {sessions.length ? sessions.slice(0, 8).map((x: any) => (
+          <Paper key={x.id} variant="outlined" sx={{ p: 2, bgcolor: 'background.default' }}>
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
+              <Typography variant="subtitle2">{x.mins} min · {x.modalities.join(' + ')}</Typography>
+              <Typography variant="overline" sx={{ color: 'text.secondary' }}>{x.completedAt}</Typography>
+            </Stack>
+            <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
+              {coachName(x.coachId)} · RPE {x.rpe} · pain {x.painBefore}→{x.painAfter}
+            </Typography>
+            <Typography variant="body2" sx={{ mt: 1 }}>{x.memberSummary}</Typography>
+          </Paper>
+        )) : (
+          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+            No sessions yet. Your coach&apos;s summary appears here after the first one.
+          </Typography>
+        )}
+      </Stack>
+    );
+
+    return (
+      <Stack spacing={2}>
+        <PageTitle eyebrow={`Longitudinal · ${series.length} days on record`} title="Progress" />
+
+        <Tabs value={progressView} onChange={(_, v) => setProgressView(v)} sx={{ minHeight: 40, borderBottom: 1, borderColor: 'divider' }}>
+          <Tab label="Scores" value="scores" sx={{ minHeight: 40 }} />
+          <Tab label="History" value="history" sx={{ minHeight: 40 }} />
+        </Tabs>
+
+        {progressView === 'scores' ? renderScores() : renderHistory()}
       </Stack>
     );
   };

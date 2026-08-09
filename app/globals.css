@@ -17,6 +17,11 @@
    MUI <Table/> in the app. */
 
 :root{
+  /* Opt out of mobile browsers' forced/auto-dark rendering — this app has no
+     dark palette (theme.ts palette.mode is fixed 'light'), and without this
+     phones in system dark mode will algorithmically shift fill colours,
+     visibly breaking the body map's status hues. */
+  color-scheme: light;
   --bone:#E7E4DB; --bone-2:#DCD8CD;
   --ink:#10130E; --ink-2:#171B14;
   --lime:#A9E34B; --lime-deep:#5C8528;
