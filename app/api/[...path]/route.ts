@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { eq, desc, and, inArray } from 'drizzle-orm';
 import { db, schema } from '@/db';
 import { seed } from '@/db/seed';
-import { MUSCLES, SERVICES, ADDONS, PARQ_QUESTIONS, service, addon, todayIso, uid, muscle } from '@/lib/reference';
+import { MUSCLES, SERVICES, ADDONS, PARQ_QUESTIONS, service, addon, todayIso, uid, muscle, scopeSnapshotForCoach, scopeSnapshotForMember } from '@/lib/reference';
 import { computeScores, priorityAreas } from '@/lib/scoring';
 import { simulateDeviceRead, fromManualEntry } from '@/lib/adapters/bodymap';
 
@@ -58,7 +58,13 @@ async function membersWithScores() {
   });
 }
 
-async function snapshot() {
+/* `scope` trims the response before it goes over the wire — Member and Coach
+   both used to fetch the entire database and filter client-side on every
+   5-second poll. This reuses the exact same filter functions Coach.tsx
+   already applied client-side (lib/reference.ts), just earlier in the
+   pipeline. Still not real authorization: the caller declares its own scope,
+   nothing checks they're entitled to it — see docs/adr/0002. */
+async function snapshot(scope?: { kind: 'member' | 'coach'; id: string }) {
   const [ms, cs, bk, se, pg, ck, sd, asRows, meas] = await Promise.all([
     membersWithScores(),
     db.select().from(coaches),
@@ -70,12 +76,15 @@ async function snapshot() {
     db.select().from(assessments).orderBy(desc(assessments.capturedAt)),
     db.select().from(measurements),
   ]);
-  return {
+  const full = {
     members: ms, coaches: cs, bookings: bk, sessions: se, programs: pg,
     checkins: ck, scoreDays: sd, assessments: asRows, measurements: meas,
     reference: { muscles: MUSCLES, services: SERVICES, addons: ADDONS, parqQuestions: PARQ_QUESTIONS },
     serverTime: new Date().toISOString(),
   };
+  if (scope?.kind === 'coach') return { ...full, ...scopeSnapshotForCoach(full, scope.id) };
+  if (scope?.kind === 'member') return { ...full, ...scopeSnapshotForMember(full, scope.id) };
+  return full;
 }
 
 async function slotsFor(dateStr: string, serviceId: string) {
@@ -124,7 +133,11 @@ async function handle(verb: string, seg: string[], q: URLSearchParams, body: any
   const p = seg.join('/');
 
   /* --- read --- */
-  if (verb === 'GET' && p === 'snapshot') return snapshot();
+  if (verb === 'GET' && p === 'snapshot') {
+    const kind = q.get('scope');
+    const id = q.get('id');
+    return snapshot(kind === 'member' || kind === 'coach' ? { kind, id: id || '' } : undefined);
+  }
 
   if (verb === 'GET' && p === 'availability') {
     const date = q.get('date') || todayIso();

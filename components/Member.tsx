@@ -165,7 +165,7 @@ function EmptyPanel({ children }: { children: React.ReactNode }) {
 
 export default function Member({ memberId }: { memberId: string }) {
   const theme = useTheme();
-  const { data: snap, error, refresh } = useSnapshot();
+  const { data: snap, error, refresh } = useSnapshot({ kind: 'member', id: memberId });
 
   const [msg, setMsg] = useState<string | null>(null);
   const toast = (s: string) => { setMsg(s); setTimeout(() => setMsg(null), 2800); };
@@ -177,6 +177,7 @@ export default function Member({ memberId }: { memberId: string }) {
   const [draft, setDraft] = useState<{ svc: string; date: string; slot: string | null; addons: string[] }>(
     { svc: 'st30', date: todayIso(), slot: null, addons: [] });
   const [slots, setSlots] = useState<any[]>([]);
+  const [bookOpen, setBookOpen] = useState(false);
   const [parqOpen, setParqOpen] = useState(false);
   const [referral, setReferral] = useState<string | null>(null);
 
@@ -218,6 +219,7 @@ export default function Member({ memberId }: { memberId: string }) {
         { memberId, serviceId: draft.svc, date: draft.date, time: draft.slot, addons: draft.addons }, 'MEMBER');
       toast(r.message);
       setDraft({ ...draft, slot: null });
+      setBookOpen(false);
       setTab('today');
       refresh('MEMBER');
     } catch (e: any) { toast(e?.error || 'Could not book'); }
@@ -632,13 +634,51 @@ export default function Member({ memberId }: { memberId: string }) {
     );
   };
 
+  const renderBookingsList = () => (
+    <Stack spacing={2}>
+      <PageTitle eyebrow={SITE.name} title="My bookings" />
+      {parqCallout()}
+      {myBookings.length ? (
+        <Stack spacing={1.5}>
+          {[...myBookings].sort((a: any, b: any) => (a.date + a.time).localeCompare(b.date + b.time)).map((b: any) => (
+            <Paper key={b.id} variant="outlined" sx={{ p: 2.5 }}>
+              <Stack direction="row" spacing={1} sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
+                <Eyebrow>{fmtDate(b.date)} · {b.time}</Eyebrow>
+                <Chip size="small" label={b.status} color={statusChipColor(b.status)} />
+              </Stack>
+              <Typography variant="h5" sx={{ mt: 1 }}>{service(b.serviceId).name}</Typography>
+              <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
+                {service(b.serviceId).mins} min · {coachName(b.coachId)}
+              </Typography>
+              <Button
+                variant="text"
+                sx={{ mt: 1 }}
+                onClick={() => act(api('DELETE', `/bookings/${b.id}`, undefined, 'MEMBER'), 'Session cancelled')}
+              >
+                Cancel
+              </Button>
+            </Paper>
+          ))}
+        </Stack>
+      ) : (
+        <EmptyPanel>No upcoming bookings yet.</EmptyPanel>
+      )}
+      <Button variant="contained" size="large" onClick={() => setBookOpen(true)}>Book a slot</Button>
+    </Stack>
+  );
+
   const renderBook = () => {
+    if (!bookOpen) return renderBookingsList();
+
     const sv = service(draft.svc);
     const total = sv.aed + draft.addons.reduce((n, a) => n + addon(a).aed, 0);
     const dates = [...Array(7)].map((_, i) => addDays(new Date(), i));
 
     return (
       <Stack spacing={2}>
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+          <Button variant="text" size="small" onClick={() => setBookOpen(false)}>← My bookings</Button>
+        </Stack>
         <PageTitle eyebrow={SITE.name} title="Book a session" />
 
         {parqCallout()}

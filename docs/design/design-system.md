@@ -69,7 +69,16 @@ Rules:
 
 ### Shape
 
-`shape.borderRadius: «4»`. Cards and inputs share it. The goniometer arc is the only curved motif; nothing else gets a pill radius.
+`shape.borderRadius: 8`. Cards and inputs share it. The goniometer arc is the only curved motif; nothing else gets a pill radius.
+
+### Canvas texture — not the same thing as elevation
+
+Cards never get a shadow (see §2 below) — but a flat card needs *something*
+behind it or the page reads as boxy. `theme/theme.ts`'s `MuiCssBaseline`
+override puts a subtle repeating-grid + radial lime glow on `<body>` (the
+same pattern the pre-MUI prototype had). Depth lives in the canvas, never on
+the card. Don't reach for a `boxShadow` to fix a page that looks flat — fix
+the background behind it instead.
 
 ## 2. Layout
 
@@ -78,6 +87,7 @@ Rules:
 - `<Grid size={{ ... }}>` for genuine two-dimensional layouts only.
 - `<Box>` for structural blocks.
 - `<Paper>` for surfaces that sit above the canvas. Prefer `variant="outlined"` over elevation — bone-and-ink is a flat, printed language; drop shadows read as Material, not Marn.
+- Dense multi-field forms (session log, ROM capture, add-coach) use `<TextField size="small">`; a single prominent form (Gate signup) stays default size. Keep this consistent across `Coach.tsx`/`Admin.tsx` — they share the same form patterns and have drifted before.
 
 ## 3. Components
 

@@ -49,19 +49,26 @@ export async function api(verb: string, path: string, body?: any, who: Call['who
   return json;
 }
 
-/** Whole-dataset snapshot, polled. Fine at demo scale; paginate for production. */
-export function useSnapshot(pollMs = 5000) {
+/** Whole-dataset snapshot, polled. Fine at demo scale; paginate for production.
+ *
+ * `scope` lets a caller that only needs one member's or one coach's data ask
+ * the server to filter before sending, instead of shipping the whole
+ * database on every poll and filtering client-side (which is what Member and
+ * Coach both used to do). Admin and the Gate persona picker still need the
+ * full unscoped snapshot and pass no scope. */
+export function useSnapshot(scope?: { kind: 'member' | 'coach'; id: string }, pollMs = 12000) {
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
+  const qs = scope ? `?scope=${scope.kind}&id=${encodeURIComponent(scope.id)}` : '';
 
   const refresh = useCallback(async (who: Call['who'] = 'SYSTEM', silent = false) => {
     try {
       const d = silent
-        ? await fetch('/api/snapshot', { cache: 'no-store' }).then((r) => r.json())
-        : await api('GET', '/snapshot', undefined, who);
+        ? await fetch(`/api/snapshot${qs}`, { cache: 'no-store' }).then((r) => r.json())
+        : await api('GET', `/snapshot${qs}`, undefined, who);
       if (d?.error) setError(d.error); else { setData(d); setError(null); }
     } catch (e: any) { setError(e?.error || 'Could not reach the API'); }
-  }, []);
+  }, [qs]);
 
   useEffect(() => {
     refresh('SYSTEM');

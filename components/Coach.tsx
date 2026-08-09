@@ -56,7 +56,7 @@ const statusChip = (status: string) =>
 type Stat = { label: string; value: number | string };
 
 export default function Coach({ coachId }: { coachId: string }) {
-  const { data: rawSnap, error, refresh } = useSnapshot();
+  const { data: rawSnap, error, refresh } = useSnapshot({ kind: 'coach', id: coachId });
 
   const [msg, setMsg] = useState<string | null>(null);
   const toast = (s: string) => { setMsg(s); setTimeout(() => setMsg(null), 2800); };

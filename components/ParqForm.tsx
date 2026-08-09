@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import Alert from '@mui/material/Alert';
 import AlertTitle from '@mui/material/AlertTitle';
 import Button from '@mui/material/Button';
@@ -48,6 +48,7 @@ export default function ParqForm({ open, memberId, onClose, onCleared, onReferra
   const [referral, setReferral] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
 
   const answered = PARQ_QUESTIONS.filter((q) => answers[q.key] !== undefined).length;
   const complete = answered === PARQ_QUESTIONS.length;
@@ -56,6 +57,24 @@ export default function ParqForm({ open, memberId, onClose, onCleared, onReferra
     setAnswers((a) => ({ ...a, [key]: value }));
     setReferral(null);
     setError(null);
+  };
+
+  /* Dev/demo convenience only — compiled out of a production build via the
+   * NODE_ENV check below. Deliberately not exposed to a real member: the
+   * referral gate in submit() is the one non-negotiable part of the
+   * self-service exception (docs/adr/0001-parq-self-service.md), and a
+   * member-facing bypass would defeat it. This reuses the same clear
+   * endpoint the Coach/Admin "Mark PAR-Q cleared" actions already call. */
+  const override = async () => {
+    setBusy(true);
+    try {
+      await api('POST', `/members/${memberId}/parq`, { cleared: true }, 'MEMBER');
+      onCleared();
+    } catch (e: any) {
+      setError(e?.error || 'Override failed.');
+    } finally {
+      setBusy(false);
+    }
   };
 
   const submit = async () => {
@@ -74,9 +93,11 @@ export default function ParqForm({ open, memberId, onClose, onCleared, onReferra
       } else {
         setReferral(r.message);
         onReferral(r.message);
+        contentRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
       }
     } catch (e: any) {
       setError(e?.error || 'Could not send your answers. Check your connection and try again.');
+      contentRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
     } finally {
       setBusy(false);
     }
@@ -91,7 +112,7 @@ export default function ParqForm({ open, memberId, onClose, onCleared, onReferra
         Readiness screening
       </DialogTitle>
 
-      <DialogContent dividers>
+      <DialogContent dividers ref={contentRef}>
         <Stack spacing={2}>
           <Typography variant="body2" sx={{ color: 'text.secondary' }}>
             Seven questions about your health history. Answer honestly — if anything suggests you
@@ -148,6 +169,11 @@ export default function ParqForm({ open, memberId, onClose, onCleared, onReferra
           {answered} of {PARQ_QUESTIONS.length} answered
         </Typography>
         <Button variant="text" onClick={onClose} disabled={busy}>Close</Button>
+        {process.env.NODE_ENV !== 'production' && (
+          <Button variant="text" color="warning" onClick={override} disabled={busy}>
+            Skip for testing (dev only)
+          </Button>
+        )}
         <Button variant="contained" onClick={submit} disabled={!complete || busy}>
           {busy ? 'Sending…' : 'Submit screening'}
         </Button>

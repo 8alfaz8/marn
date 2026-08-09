@@ -61,7 +61,7 @@ const theme = createTheme({
   spacing: 8,
 
   shape: {
-    borderRadius: 3,
+    borderRadius: 8,
   },
 
   palette: {
@@ -116,6 +116,24 @@ const theme = createTheme({
   },
 
   components: {
+    // Cards stay flat (no shadow, per the design system's "printed language"
+    // rule below) — but a flat card on a flat single-colour page reads as
+    // boxy with nothing behind it. This restores the subtle printed-grid +
+    // radial accent glow the pre-MUI prototype had on <body>, lost when
+    // CssBaseline replaced it with a plain background-color. Depth lives in
+    // the canvas, never on the card itself.
+    MuiCssBaseline: {
+      styleOverrides: {
+        body: {
+          backgroundImage: [
+            'repeating-linear-gradient(to right, rgba(16,19,14,.05) 0 1px, transparent 1px 64px)',
+            'repeating-linear-gradient(to bottom, rgba(16,19,14,.05) 0 1px, transparent 1px 64px)',
+            'radial-gradient(900px 500px at 88% -8%, rgba(169,227,75,.14), transparent 62%)',
+          ].join(','),
+          backgroundAttachment: 'fixed',
+        },
+      },
+    },
     MuiButton: {
       defaultProps: { disableElevation: true },
       styleOverrides: {

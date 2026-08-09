@@ -105,6 +105,27 @@ export function scopeSnapshotForCoach(snap: any, coachId: string) {
   };
 }
 
+/* Scopes a full snapshot down to one member: their own record plus everything
+   keyed to their memberId. `coaches` stays unfiltered (small table, needed
+   for coach-name lookups on bookings/sessions) and `scoreDays` is filtered
+   the same way as the other member-keyed tables. Used server-side by
+   GET /snapshot?scope=member — see docs/adr/0002-prototype-auth-gap.md for
+   why this is a payload-size optimisation, not real authorization. */
+export function scopeSnapshotForMember(snap: any, memberId: string) {
+  const inScope = (id: string) => id === memberId;
+  return {
+    ...snap,
+    members: snap.members.filter((m: any) => m.id === memberId),
+    bookings: snap.bookings.filter((b: any) => inScope(b.memberId)),
+    sessions: snap.sessions.filter((s: any) => inScope(s.memberId)),
+    assessments: snap.assessments.filter((a: any) => inScope(a.memberId)),
+    measurements: snap.measurements.filter((x: any) => inScope(x.memberId)),
+    programs: snap.programs.filter((p: any) => inScope(p.memberId)),
+    checkins: snap.checkins.filter((c: any) => inScope(c.memberId)),
+    scoreDays: snap.scoreDays.filter((s: any) => inScope(s.memberId)),
+  };
+}
+
 /* helpers shared by server and client */
 export const iso = (d: Date) => d.toISOString().slice(0, 10);
 export const todayIso = () => iso(new Date());

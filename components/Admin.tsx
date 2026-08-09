@@ -23,16 +23,35 @@ import Slider from '@mui/material/Slider';
 import Checkbox from '@mui/material/Checkbox';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import CloseIcon from '@mui/icons-material/Close';
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
+import ToggleButton from '@mui/material/ToggleButton';
+import { BarChart } from '@mui/x-charts/BarChart';
 import Chrome from './Chrome';
 import { Gonio } from './Viz';
 import { api, useSnapshot } from '@/lib/store';
-import { MUSCLES, MODALITIES, SITE, service, addon, colorOf, iso, addDays, todayIso } from '@/lib/reference';
+import { MUSCLES, MODALITIES, SITE, SERVICES, service, addon, colorOf, iso, addDays, todayIso } from '@/lib/reference';
 
 const fmtDate = (d: string) => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 const blankSession = (mins = 30) => ({
   mins, rpe: 6, painBefore: 5, painAfter: 2,
   modalities: ['Assisted stretch'] as string[], coachNotes: '', memberSummary: '',
 });
+
+/* Shared by the Overview coach-outcomes table and the Earnings tab. "All"
+ * has no cutoff. Revenue/outcomes are derived straight from bookings and
+ * sessions — there is no ledger table yet (see docs/architecture/overview.md),
+ * so this stays labeled "Earnings," not "Ledger." */
+const RANGES = [
+  { key: '7d', label: '7d', days: 7 },
+  { key: '1m', label: '1m', days: 30 },
+  { key: '6m', label: '6m', days: 180 },
+  { key: 'all', label: 'All', days: null as number | null },
+] as const;
+type RangeKey = (typeof RANGES)[number]['key'];
+const cutoffFor = (key: RangeKey) => {
+  const r = RANGES.find((x) => x.key === key)!;
+  return r.days === null ? null : iso(addDays(new Date(), -r.days));
+};
 
 /* Unscoped — this is the one surface that legitimately sees the whole
    studio: revenue, cross-coach outcomes, capacity, and every member. Content
@@ -47,7 +66,9 @@ export default function Admin() {
     try { await p; toast(m); refresh(); after?.(); } catch (e: any) { toast(e?.error || 'Failed'); }
   };
 
-  const [view, setView] = useState<'overview' | 'roster' | 'members'>('overview');
+  const [view, setView] = useState<'overview' | 'roster' | 'members' | 'earnings'>('overview');
+  const [overviewRange, setOverviewRange] = useState<RangeKey>('1m');
+  const [earningsRange, setEarningsRange] = useState<RangeKey>('1m');
   const [open, setOpen] = useState<string | null>(null);
   const [newCoach, setNewCoach] = useState('');
   const [rom, setRom] = useState<Record<string, number>>({});
@@ -90,14 +111,16 @@ export default function Admin() {
     return <Container sx={{ py: 6 }}><Typography variant="overline">Loading…</Typography></Container>;
   }
 
-  const perCoach = snap.coaches.map((c: any) => {
-    const ss = snap.sessions.filter((s: any) => s.coachId === c.id);
+  const coachOutcomes = (cutoff: string | null) => snap.coaches.map((c: any) => {
+    const ss = snap.sessions.filter((s: any) => s.coachId === c.id && (!cutoff || s.completedAt >= cutoff));
     return {
       ...c, sessions: ss.length,
       avgRpe: ss.length ? (ss.reduce((a: number, b: any) => a + b.rpe, 0) / ss.length).toFixed(1) : '—',
       painDrop: ss.length ? (ss.reduce((a: number, b: any) => a + (b.painBefore - b.painAfter), 0) / ss.length).toFixed(1) : '—',
     };
   });
+  const perCoach = coachOutcomes(null); // all-time, used by Roster
+  const perCoachInRange = coachOutcomes(cutoffFor(overviewRange));
 
   const renderOverview = () => (
     <Container maxWidth="lg" sx={{ py: 3 }}>
@@ -116,11 +139,16 @@ export default function Admin() {
       <Grid container spacing={3}>
         <Grid size={{ xs: 12, md: 6 }}>
           <Paper variant="outlined" sx={{ p: 2.5 }}>
-            <Typography variant="overline" color="text.secondary">Coach outcomes</Typography>
+            <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
+              <Typography variant="overline" color="text.secondary">Coach outcomes</Typography>
+              <ToggleButtonGroup size="small" exclusive value={overviewRange} onChange={(_, v) => v && setOverviewRange(v)}>
+                {RANGES.map((r) => <ToggleButton key={r.key} value={r.key}>{r.label}</ToggleButton>)}
+              </ToggleButtonGroup>
+            </Stack>
             <Table size="small" sx={{ mt: 1 }}>
               <TableHead><TableRow><TableCell>Coach</TableCell><TableCell align="right">Sessions</TableCell><TableCell align="right">Avg RPE</TableCell><TableCell align="right">Avg pain drop</TableCell></TableRow></TableHead>
               <TableBody>
-                {perCoach.map((c: any) => (
+                {perCoachInRange.map((c: any) => (
                   <TableRow key={c.id}>
                     <TableCell><Typography variant="body2" sx={{ fontWeight: 600 }}>{c.name}</Typography><Typography variant="caption" color="text.secondary">{c.title}</Typography></TableCell>
                     <TableCell align="right">{c.sessions}</TableCell>
@@ -159,6 +187,77 @@ export default function Admin() {
     </Container>
   );
 
+  const renderEarnings = () => {
+    const cutoff = cutoffFor(earningsRange);
+    const inRange = snap.bookings.filter((b: any) => b.status !== 'cancelled' && (!cutoff || b.date >= cutoff));
+    const total = inRange.reduce((s: number, b: any) => s + b.aed, 0);
+
+    const byDay = new Map<string, number>();
+    for (const b of inRange) byDay.set(b.date, (byDay.get(b.date) || 0) + b.aed);
+    const days = [...byDay.keys()].sort();
+
+    const byService = SERVICES.map((sv) => {
+      const bs = inRange.filter((b: any) => b.serviceId === sv.id);
+      return { ...sv, count: bs.length, revenue: bs.reduce((s: number, b: any) => s + b.aed, 0) };
+    }).filter((s) => s.count > 0);
+
+    return (
+      <Container maxWidth="lg" sx={{ py: 3 }}>
+        <Stack direction="row" sx={{ mb: 2, justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: 2 }}>
+          <Box><Typography variant="overline" color="text.secondary">Booked revenue, not a ledger — see note below</Typography><Typography variant="h4">Earnings</Typography></Box>
+          <Stack direction="row" spacing={3} sx={{ alignItems: 'center' }}>
+            <Box><Typography variant="overline" color="text.secondary">Total</Typography><Typography variant="readout" sx={{ fontSize: 22 }}>AED {total}</Typography></Box>
+            <ToggleButtonGroup size="small" exclusive value={earningsRange} onChange={(_, v) => v && setEarningsRange(v)}>
+              {RANGES.map((r) => <ToggleButton key={r.key} value={r.key}>{r.label}</ToggleButton>)}
+            </ToggleButtonGroup>
+          </Stack>
+        </Stack>
+
+        <Grid container spacing={3}>
+          <Grid size={{ xs: 12, md: 7 }}>
+            <Paper variant="outlined" sx={{ p: 2.5 }}>
+              <Typography variant="overline" color="text.secondary">Revenue by day</Typography>
+              {days.length ? (
+                <BarChart
+                  height={240}
+                  margin={{ top: 16, bottom: 24, left: 8, right: 8 }}
+                  xAxis={[{ data: days, scaleType: 'band', valueFormatter: (v: string) => v.slice(5) }]}
+                  series={[{ data: days.map((d) => byDay.get(d) || 0), label: 'AED', color: '#A9E34B' }]}
+                  hideLegend
+                />
+              ) : (
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>No booked revenue in this range.</Typography>
+              )}
+            </Paper>
+          </Grid>
+          <Grid size={{ xs: 12, md: 5 }}>
+            <Paper variant="outlined" sx={{ p: 2.5 }}>
+              <Typography variant="overline" color="text.secondary">By service</Typography>
+              <Table size="small" sx={{ mt: 1 }}>
+                <TableHead><TableRow><TableCell>Service</TableCell><TableCell align="right">Bookings</TableCell><TableCell align="right">AED</TableCell></TableRow></TableHead>
+                <TableBody>
+                  {byService.map((s) => (
+                    <TableRow key={s.id}>
+                      <TableCell>{s.name}</TableCell>
+                      <TableCell align="right">{s.count}</TableCell>
+                      <TableCell align="right">{s.revenue}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </Paper>
+          </Grid>
+        </Grid>
+
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 3, maxWidth: '70ch' }}>
+          This is booked revenue derived from the bookings table for the selected range — there is no credit ledger
+          or transaction log behind it yet (see docs/architecture/overview.md). Treat it as a demo of what a real
+          earnings report would show, not an accounting record.
+        </Typography>
+      </Container>
+    );
+  };
+
   const renderRoster = () => (
     <Container maxWidth="lg" sx={{ py: 3 }}>
       <Typography variant="overline" color="text.secondary">Staff</Typography>
@@ -180,7 +279,7 @@ export default function Admin() {
           <Paper variant="outlined" sx={{ p: 2.5 }}>
             <Typography variant="overline" color="text.secondary">Add a coach</Typography>
             <Stack spacing={1.5} sx={{ mt: 1.5 }}>
-              <TextField label="Full name" value={newCoach} onChange={(e) => setNewCoach(e.target.value)} />
+              <TextField label="Full name" size="small" value={newCoach} onChange={(e) => setNewCoach(e.target.value)} />
               <Button variant="contained" disabled={!newCoach.trim()} onClick={() =>
                 act(api('POST', '/coaches', { name: newCoach }, 'ADMIN').then(() => setNewCoach('')), 'Coach added')}>
                 Add coach
@@ -323,8 +422,8 @@ export default function Admin() {
             <Grid size={6}><TextField label="Pain before" type="number" size="small" fullWidth slotProps={{ htmlInput: { min: 0, max: 10 } }} value={sform.painBefore} onChange={(e) => setSform({ ...sform, painBefore: Number(e.target.value) })} /></Grid>
             <Grid size={6}><TextField label="Pain after" type="number" size="small" fullWidth slotProps={{ htmlInput: { min: 0, max: 10 } }} value={sform.painAfter} onChange={(e) => setSform({ ...sform, painAfter: Number(e.target.value) })} /></Grid>
           </Grid>
-          <TextField label="Coach notes — internal" multiline rows={2} fullWidth sx={{ mt: 2 }} value={sform.coachNotes} onChange={(e) => setSform({ ...sform, coachNotes: e.target.value })} />
-          <TextField label="Summary the member reads" multiline rows={2} fullWidth sx={{ mt: 2 }} value={sform.memberSummary} onChange={(e) => setSform({ ...sform, memberSummary: e.target.value })} />
+          <TextField label="Coach notes — internal" size="small" multiline rows={2} fullWidth sx={{ mt: 2 }} value={sform.coachNotes} onChange={(e) => setSform({ ...sform, coachNotes: e.target.value })} />
+          <TextField label="Summary the member reads" size="small" multiline rows={2} fullWidth sx={{ mt: 2 }} value={sform.memberSummary} onChange={(e) => setSform({ ...sform, memberSummary: e.target.value })} />
           <Button variant="contained" sx={{ mt: 2 }} disabled={!sform.memberSummary.trim()} onClick={() => act(
             api('POST', '/sessions', { memberId: m.id, coachId: snap.coaches[0]?.id, bookingId: todayBooking?.id || null, ...sform }, 'ADMIN'),
             'Session logged — summary sent to member', () => setOpen(null))}>
@@ -372,12 +471,14 @@ export default function Admin() {
             <Tab label="Overview" value="overview" />
             <Tab label="Roster" value="roster" />
             <Tab label="Members" value="members" />
+            <Tab label="Earnings" value="earnings" />
           </Tabs>
         </Container>
       </Box>
       {view === 'overview' && renderOverview()}
       {view === 'roster' && renderRoster()}
       {view === 'members' && renderMembers()}
+      {view === 'earnings' && renderEarnings()}
       {open && renderDrawer()}
     </Chrome>
   );
