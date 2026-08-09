@@ -166,7 +166,7 @@ async function handle(verb: string, seg: string[], q: URLSearchParams, body: any
       id, name: body.name.trim(), phone: body.phone || '+971 5x xxx xxxx', goal: body.goal || null,
       persona: 'custom', joinedAt: todayIso(), credits: body.credits ?? 0, streak: 0,
       wearable: body.wearable || null, parqCleared: !!body.parqCleared,
-      parqAt: body.parqCleared ? todayIso() : null, isDemo: false,
+      parqAt: body.parqCleared ? todayIso() : null, addedByCoachId: body.coachId || null, isDemo: false,
     } as any);
     if (!body.parqCleared) {
       await db.insert(flags).values({ id: uid('fl'), memberId: id, text: 'PAR-Q not completed. Screen before first session.', since: todayIso() } as any);

@@ -91,6 +91,10 @@ export function scopeSnapshotForCoach(snap: any, coachId: string) {
   for (const key of ['sessions', 'assessments', 'programs'] as const) {
     for (const row of snap[key]) if (row.coachId === coachId) memberIds.add(row.memberId);
   }
+  // and members this coach added but hasn't booked/assessed/logged yet — without
+  // this a freshly-added member has no booking/session/assessment tying them to
+  // the coach and disappears from their own roster right after creation.
+  for (const m of snap.members) if (m.addedByCoachId === coachId) memberIds.add(m.id);
   const members = snap.members.filter((m: any) => memberIds.has(m.id));
   const inScope = (memberId: string) => memberIds.has(memberId);
   return {

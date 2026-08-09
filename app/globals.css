@@ -29,6 +29,12 @@
   --r:3px;
 }
 *{box-sizing:border-box}
+/* MUI's own outlined-input CSS relies on box-sizing:content-box (padding
+   16.5px 14px + height:1.4375em = the standard 56px control height); this is
+   unlayered so it would otherwise always beat that layered MUI rule regardless
+   of specificity (see the note above on cascade layers), collapsing every
+   TextField to ~33px and knocking its label off-centre. */
+input,textarea,select{box-sizing:content-box}
 html,body{height:100%}
 :focus-visible{outline:2px solid var(--lime-deep);outline-offset:2px}
 

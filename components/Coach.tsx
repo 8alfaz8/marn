@@ -369,7 +369,7 @@ export default function Coach({ coachId }: { coachId: string }) {
                 />
                 <Box>
                   <Button variant="contained" disabled={!newMember.name.trim()} onClick={() => act(
-                    api('POST', '/members', newMember, 'COACH')
+                    api('POST', '/members', { ...newMember, coachId }, 'COACH')
                       .then(() => setNewMember({ name: '', phone: '', goal: '', parqCleared: false })),
                     'Member created — starts with no data')}>Create member</Button>
                 </Box>

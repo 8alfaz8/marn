@@ -37,6 +37,11 @@ export const members = pgTable('members', {
   wearable: text('wearable'),
   parqCleared: boolean('parq_cleared').default(false).notNull(),
   parqAt: date('parq_at'),
+  // Set when a coach adds the member from the console (Coach.tsx "Add a
+  // member"), null for self-service signups (Gate.tsx). Lets
+  // scopeSnapshotForCoach keep a freshly-added member in that coach's own
+  // roster before any booking/session/assessment exists to tie them together.
+  addedByCoachId: text('added_by_coach_id'),
   isDemo: boolean('is_demo').default(true).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });

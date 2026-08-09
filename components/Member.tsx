@@ -36,6 +36,7 @@ import TodayOutlinedIcon from '@mui/icons-material/TodayOutlined';
 import { LineChart } from '@mui/x-charts/LineChart';
 import Chrome from './Chrome';
 import ParqForm from './ParqForm';
+import CheckinForm from './CheckinForm';
 import { Gonio, BodyMap } from './Viz';
 import { api, useSnapshot } from '@/lib/store';
 import {
@@ -67,7 +68,7 @@ type TabKey = 'today' | 'home' | 'body' | 'progress' | 'book';
 /* Home sits second, not last — it is the thing a member opens between visits. */
 const TABS: { key: TabKey; label: string; icon: React.ReactNode }[] = [
   { key: 'today', label: 'Today', icon: <TodayOutlinedIcon /> },
-  { key: 'home', label: 'Home', icon: <SelfImprovementOutlinedIcon /> },
+  { key: 'home', label: 'At Home', icon: <SelfImprovementOutlinedIcon /> },
   { key: 'body', label: 'Body', icon: <AccessibilityNewOutlinedIcon /> },
   { key: 'progress', label: 'Progress', icon: <ShowChartOutlinedIcon /> },
   { key: 'book', label: 'Book', icon: <EventAvailableOutlinedIcon /> },
@@ -179,6 +180,7 @@ export default function Member({ memberId }: { memberId: string }) {
   const [slots, setSlots] = useState<any[]>([]);
   const [bookOpen, setBookOpen] = useState(false);
   const [parqOpen, setParqOpen] = useState(false);
+  const [checkinOpen, setCheckinOpen] = useState(false);
   const [referral, setReferral] = useState<string | null>(null);
 
   const s: any = snap ?? EMPTY_SNAP;
@@ -312,14 +314,7 @@ export default function Member({ memberId }: { memberId: string }) {
               {fmtDate(next.date)} · {next.time} · {service(next.serviceId).mins} min · {coachName(next.coachId)}
             </Typography>
             <Stack direction="row" spacing={1} sx={{ mt: 2, flexWrap: 'wrap' }}>
-              <Button
-                variant="outlined"
-                onClick={() => act(api('POST', '/checkins', {
-                  memberId, sleep: 3, pain: 5,
-                  areas: ['lower back', 'right shoulder'],
-                  note: 'Slept badly, shoulder stiff.',
-                }, 'MEMBER'), 'Check-in sent to your coach')}
-              >
+              <Button variant="outlined" onClick={() => setCheckinOpen(true)}>
                 Pre-session check-in
               </Button>
               <Button
@@ -883,6 +878,14 @@ export default function Member({ memberId }: { memberId: string }) {
           onClose={() => setParqOpen(false)}
           onCleared={onParqCleared}
           onReferral={(m) => setReferral(m)}
+        />
+      )}
+      {me && (
+        <CheckinForm
+          open={checkinOpen}
+          memberId={memberId}
+          onClose={() => setCheckinOpen(false)}
+          onSent={() => { setCheckinOpen(false); toast('Check-in sent to your coach'); refresh('MEMBER'); }}
         />
       )}
     </Chrome>
