@@ -41,62 +41,90 @@ export function Gonio({ pct, size = 160, label, sub, color }: {
   );
 }
 
-export function AreaChart({ series, keys, height = 170 }: { series: any[]; keys: string[]; height?: number }) {
-  if (!series?.length) return <div className="kv" style={{ padding: 24 }}>No history yet. The line starts after your first assessment.</div>;
-  const W = 680, H = height, PL = 34, PB = 22, PT = 10, min = 30, max = 100;
-  const n = series.length;
-  const X = (i: number) => PL + (W - PL - 6) * (n === 1 ? 0.5 : i / (n - 1));
-  const Y = (v: number) => PT + (H - PT - PB) * (1 - (clamp(v, min, max) - min) / (max - min));
-  const COLORS = ['#A9E34B', '#43B07C', '#E0A33C'];
-  const every = Math.max(1, Math.floor(n / 7));
+/* ---------------------------------------------------------------------------
+   Body map.
 
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} width="100%" preserveAspectRatio="none" style={{ display: 'block', height }}>
-      <defs>
-        <linearGradient id="marnFill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#A9E34B" stopOpacity=".35" />
-          <stop offset="1" stopColor="#A9E34B" stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      {[30, 50, 70, 90, 100].map((v) => (
-        <g key={v}>
-          <line x1={PL} y1={Y(v)} x2={W - 6} y2={Y(v)} stroke="rgba(237,235,226,.09)" />
-          <text x={4} y={Y(v) + 3.5} fontFamily="JetBrains Mono,monospace" fontSize={9} fill="#8F9683">{v}</text>
-        </g>
-      ))}
-      {keys.map((k, ki) => {
-        const d = series.map((s, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)} ${Y(s[k]).toFixed(1)}`).join(' ');
-        return (
-          <g key={k}>
-            {keys.length === 1 && <path d={`${d} L${X(n - 1)} ${H - PB} L${PL} ${H - PB} Z`} fill="url(#marnFill)" />}
-            <path d={d} fill="none" stroke={COLORS[ki]} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
-          </g>
-        );
-      })}
-      {series.map((s, i) => (i % every === 0 || i === n - 1) && (
-        <text key={i} x={X(i)} y={H - 6} textAnchor="middle" fontFamily="JetBrains Mono,monospace" fontSize={8.5} fill="#8F9683">
-          {String(s.date).slice(5)}
-        </text>
-      ))}
-    </svg>
-  );
-}
+   Hand-plotted cubic-Bézier silhouettes in the 200 × 320 coordinate space
+   below. Not commissioned anatomical art — the blueprint (§4.1.2, OPEN) parks
+   that as a design task. The bar this clears is "a body with shaped muscle
+   regions" rather than the rectangles-on-a-stick-figure it replaces.
+
+   Landmarks everything is plotted against: head 18–59, neck 56–74,
+   shoulder line ~73, ribs ~120, waist ~146, hip crease ~176, knee ~250,
+   ankle ~305. Centre line x = 100; bilateral pairs mirror as x' = 200 − x.
+--------------------------------------------------------------------------- */
+
+/* Non-interactive, unfilled backdrop the regions sit on top of. */
+const OUTLINE: string[] = [
+  // head
+  'M100,18 C110,18 118,27 118,38 C118,50 110,59 100,59 C90,59 82,50 82,38 C82,27 90,18 100,18 Z',
+  // neck, shoulders, torso taper to waist, hips
+  'M92,57 C92,65 90,70 84,73 C75,76 69,81 68,90 C67,100 70,110 71,120 '
+    + 'C72,132 77,138 78,146 C74,154 71,164 73,176 C76,187 85,192 100,192 '
+    + 'C115,192 124,187 127,176 C129,164 126,154 122,146 C123,138 128,132 129,120 '
+    + 'C130,110 133,100 132,90 C131,81 125,76 116,73 C110,70 108,65 108,57 Z',
+  // arms
+  'M68,88 C62,94 58,108 56,124 C54,140 52,152 51,164 C51,168 53,170 55,169 '
+    + 'C58,168 59,164 60,158 C62,144 65,128 68,114 C70,104 71,95 71,90 Z',
+  'M132,88 C138,94 142,108 144,124 C146,140 148,152 149,164 C149,168 147,170 145,169 '
+    + 'C142,168 141,164 140,158 C138,144 135,128 132,114 C130,104 129,95 129,90 Z',
+  // legs
+  'M76,188 C72,206 71,228 74,246 C76,264 78,284 79,302 C79,306 80,308 82,308 '
+    + 'L92,308 C93,304 93,300 93,296 C93,278 94,262 95,244 C96,224 97,206 98,190 Z',
+  'M124,188 C128,206 129,228 126,246 C124,264 122,284 121,302 C121,306 120,308 118,308 '
+    + 'L108,308 C107,304 107,300 107,296 C107,278 106,262 105,244 C104,224 103,206 102,190 Z',
+];
+
+const NECK = 'M92,56 C92,64 91,69 88,74 C94,77 106,77 112,74 C109,69 108,64 108,56 C103,59 97,59 92,56 Z';
+const DELTOIDS = [
+  'M84,73 C76,75 69,80 67,89 C65,98 67,106 71,111 C77,109 81,104 83,96 C84,88 84,79 84,73 Z',
+  'M116,73 C124,75 131,80 133,89 C135,98 133,106 129,111 C123,109 119,104 117,96 C116,88 116,79 116,73 Z',
+];
 
 const FRONT: Record<string, string[]> = {
-  neck: ['M92,60 h16 v14 h-16 z'],
-  chest: ['M74,76 h52 v26 h-52 z'],
-  shoulders: ['M62,74 h14 v30 h-14 z', 'M124,74 h14 v30 h-14 z'],
-  hip_flexors: ['M78,158 h44 v20 h-44 z'],
-  quadriceps: ['M79,180 h19 v58 h-19 z', 'M102,180 h19 v58 h-19 z'],
+  neck: [NECK],
+  shoulders: DELTOIDS,
+  // two rounded pec shells either side of the sternum
+  chest: [
+    'M99,82 C93,80 87,81 84,85 C81,90 81,99 84,106 C88,112 95,112 99,108 C100,100 100,90 99,82 Z',
+    'M101,82 C107,80 113,81 116,85 C119,90 119,99 116,106 C112,112 105,112 101,108 C100,100 100,90 101,82 Z',
+  ],
+  // narrow band across the hip crease
+  hip_flexors: [
+    'M77,159 C85,155 115,155 123,159 C126,165 126,173 123,179 C115,183 85,183 77,179 C74,173 74,165 77,159 Z',
+  ],
+  // long tapered front-thigh forms
+  quadriceps: [
+    'M79,188 C75,202 74,220 76,238 C77,246 79,251 83,251 C88,251 91,246 92,238 C94,220 95,204 96,188 C90,185 84,185 79,188 Z',
+    'M121,188 C125,202 126,220 124,238 C123,246 121,251 117,251 C112,251 109,246 108,238 C106,220 105,204 104,188 C110,185 116,185 121,188 Z',
+  ],
 };
+
 const BACK: Record<string, string[]> = {
-  neck: ['M92,60 h16 v14 h-16 z'],
-  thoracic: ['M78,80 h44 v34 h-44 z'],
-  shoulders: ['M62,74 h14 v30 h-14 z', 'M124,74 h14 v30 h-14 z'],
-  lower_back: ['M80,118 h40 v30 h-40 z'],
-  glutes: ['M78,152 h44 v26 h-44 z'],
-  hamstrings: ['M79,182 h19 v54 h-19 z', 'M102,182 h19 v54 h-19 z'],
-  calves: ['M81,244 h16 v46 h-16 z', 'M103,244 h16 v46 h-16 z'],
+  neck: [NECK],
+  shoulders: DELTOIDS,
+  // trapezius kite across the upper back
+  thoracic: [
+    'M100,73 C90,75 80,80 75,90 C79,102 86,114 100,126 C114,114 121,102 125,90 C120,80 110,75 100,73 Z',
+  ],
+  // lumbar band
+  lower_back: [
+    'M80,130 C88,126 112,126 120,130 C123,138 123,150 120,158 C112,162 88,162 80,158 C77,150 77,138 80,130 Z',
+  ],
+  // wide rounded seat band
+  glutes: [
+    'M74,166 C80,158 92,155 100,155 C108,155 120,158 126,166 C129,176 127,187 120,192 C112,196 88,196 80,192 C73,187 71,176 74,166 Z',
+  ],
+  // tapered forms down the back of each thigh
+  hamstrings: [
+    'M80,192 C75,206 74,224 76,240 C77,247 80,251 84,251 C88,250 91,246 92,239 C94,222 95,206 96,192 C90,189 85,189 80,192 Z',
+    'M120,192 C125,206 126,224 124,240 C123,247 120,251 116,251 C112,250 109,246 108,239 C106,222 105,206 104,192 C110,189 115,189 120,192 Z',
+  ],
+  // tapered lower legs
+  calves: [
+    'M78,256 C75,266 75,280 77,292 C78,298 80,300 82,299 C85,298 87,293 88,286 C90,276 91,264 91,256 C87,253 82,253 78,256 Z',
+    'M122,256 C125,266 125,280 123,292 C122,298 120,300 118,299 C115,298 113,293 112,286 C110,276 109,264 109,256 C113,253 118,253 122,256 Z',
+  ],
 };
 
 export function BodyMap({ face, measurements, selected, onSelect }: {
@@ -109,13 +137,8 @@ export function BodyMap({ face, measurements, selected, onSelect }: {
   };
   return (
     <svg viewBox="0 0 200 320" width="100%" style={{ display: 'block', maxHeight: 330, margin: '0 auto' }}>
-      <g stroke="rgba(237,235,226,.16)" fill="rgba(237,235,226,.05)">
-        <circle cx="100" cy="42" r="18" />
-        <rect x="72" y="62" width="56" height="96" rx="8" />
-        <rect x="56" y="72" width="14" height="72" rx="7" />
-        <rect x="130" y="72" width="14" height="72" rx="7" />
-        <rect x="77" y="158" width="21" height="134" rx="9" />
-        <rect x="102" y="158" width="21" height="134" rx="9" />
+      <g stroke="rgba(237,235,226,.16)" fill="rgba(237,235,226,.05)" strokeWidth={1} pointerEvents="none">
+        {OUTLINE.map((d, i) => <path key={i} d={d} />)}
       </g>
       {Object.entries(map).map(([k, paths]) => {
         const p = pctOf(k);

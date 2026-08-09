@@ -42,6 +42,24 @@ export const MODALITIES = [
 
 export const SITE = { id: 's1', name: 'Marn — Business Bay' };
 
+/* Self-service PAR-Q. A member answers these themselves; a red-flag answer
+   blocks booking with a referral message instead of auto-clearing.
+
+   NOTE — deliberate exception to CLAUDE.md's Iron Rule ("a PAR-Q flag gates...
+   until a named person clears it... no clearing on the member's own say-so").
+   Confirmed explicitly with the product owner: self-service auto-clear stays,
+   to unblock new members immediately. See docs/adr/0001-parq-self-service.md. */
+export type ParqQuestion = { key: string; text: string; redFlag: boolean };
+export const PARQ_QUESTIONS: ParqQuestion[] = [
+  { key: 'heart', text: 'Has a doctor ever said you have a heart condition and recommended only medically supervised activity?', redFlag: true },
+  { key: 'chestPain', text: 'Do you feel pain in your chest during physical activity?', redFlag: true },
+  { key: 'balance', text: 'Have you had chest pain, dizziness, or loss of balance in the past month?', redFlag: true },
+  { key: 'bone', text: 'Do you have a bone or joint problem that could be made worse by a change in activity?', redFlag: false },
+  { key: 'medication', text: 'Are you currently on medication for blood pressure or a heart condition?', redFlag: false },
+  { key: 'doctorAdvised', text: 'Has a doctor ever advised you not to exercise?', redFlag: true },
+  { key: 'other', text: 'Is there any other reason you should be cautious about starting an activity programme?', redFlag: false },
+];
+
 export const PERSONAS = [
   { id: 'power',  label: 'Power user',  blurb: 'Nine months in. 48 sessions, wearable linked, the graph tells a story.' },
   { id: 'active', label: 'Regular',     blurb: 'Four months in. Steady progress, one open safety flag.' },
@@ -56,6 +74,36 @@ export const STATUS_COLOR: Record<string, string> = {
   restricted: '#D2532A', limited: '#E0A33C', optimal: '#A9E34B', excellent: '#43B07C',
 };
 export const colorOf = (p: number) => STATUS_COLOR[statusOf(p)];
+
+/* Scopes a full snapshot down to what one coach should see: their own
+   bookings plus the unassigned request inbox, and the members tied to those.
+   No `sites` table exists yet, so this scopes by relationship rather than
+   site. Client-side only — see docs/adr/0002-prototype-auth-gap.md; a coach
+   with dev tools open could still see the raw snapshot from the network tab.
+   Business aggregates (revenue, cross-coach comparisons) are simply omitted
+   rather than passed through — that content now lives only in the admin
+   view (components/Admin.tsx). */
+export function scopeSnapshotForCoach(snap: any, coachId: string) {
+  const bookings = snap.bookings.filter((b: any) => b.coachId === coachId || (b.coachId == null && b.status === 'requested'));
+  const memberIds = new Set(bookings.map((b: any) => b.memberId));
+  snap.members.forEach((m: any) => { if (m.id && memberIds.has(m.id)) memberIds.add(m.id); });
+  // also include members this coach has directly worked with historically
+  for (const key of ['sessions', 'assessments', 'programs'] as const) {
+    for (const row of snap[key]) if (row.coachId === coachId) memberIds.add(row.memberId);
+  }
+  const members = snap.members.filter((m: any) => memberIds.has(m.id));
+  const inScope = (memberId: string) => memberIds.has(memberId);
+  return {
+    ...snap,
+    bookings,
+    members,
+    sessions: snap.sessions.filter((s: any) => inScope(s.memberId)),
+    assessments: snap.assessments.filter((a: any) => inScope(a.memberId)),
+    measurements: snap.measurements.filter((x: any) => inScope(x.memberId)),
+    programs: snap.programs.filter((p: any) => inScope(p.memberId)),
+    checkins: snap.checkins.filter((c: any) => inScope(c.memberId)),
+  };
+}
 
 /* helpers shared by server and client */
 export const iso = (d: Date) => d.toISOString().slice(0, 10);

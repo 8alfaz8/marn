@@ -6,7 +6,7 @@ import { useEffect, useState, useCallback } from 'react';
    round-trips that wrote the rows. */
 
 export type Call = {
-  id: string; who: 'MEMBER' | 'COACH' | 'SYSTEM';
+  id: string; who: 'MEMBER' | 'COACH' | 'ADMIN' | 'SYSTEM';
   verb: string; path: string; req: any; res: any;
   status: number; ms: number; at: Date; open?: boolean;
 };

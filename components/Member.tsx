@@ -1,33 +1,198 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { Gonio, AreaChart, BodyMap } from './Viz';
-import { api } from '@/lib/store';
-import { MUSCLES, SERVICES, ADDONS, SITE, muscle, service, addon, colorOf, iso, addDays, todayIso } from '@/lib/reference';
+import Alert from '@mui/material/Alert';
+import AlertTitle from '@mui/material/AlertTitle';
+import Box from '@mui/material/Box';
+import BottomNavigation from '@mui/material/BottomNavigation';
+import BottomNavigationAction from '@mui/material/BottomNavigationAction';
+import Button from '@mui/material/Button';
+import Checkbox from '@mui/material/Checkbox';
+import Chip from '@mui/material/Chip';
+import Container from '@mui/material/Container';
+import Divider from '@mui/material/Divider';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import Grid from '@mui/material/Grid';
+import LinearProgress from '@mui/material/LinearProgress';
+import List from '@mui/material/List';
+import ListItemButton from '@mui/material/ListItemButton';
+import Paper from '@mui/material/Paper';
+import Stack from '@mui/material/Stack';
+import Table from '@mui/material/Table';
+import TableBody from '@mui/material/TableBody';
+import TableCell from '@mui/material/TableCell';
+import TableContainer from '@mui/material/TableContainer';
+import TableHead from '@mui/material/TableHead';
+import TableRow from '@mui/material/TableRow';
+import ToggleButton from '@mui/material/ToggleButton';
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
+import Typography from '@mui/material/Typography';
+import { alpha, useTheme } from '@mui/material/styles';
+import type { Theme } from '@mui/material/styles';
+import AccessibilityNewOutlinedIcon from '@mui/icons-material/AccessibilityNewOutlined';
+import EventAvailableOutlinedIcon from '@mui/icons-material/EventAvailableOutlined';
+import SelfImprovementOutlinedIcon from '@mui/icons-material/SelfImprovementOutlined';
+import ShowChartOutlinedIcon from '@mui/icons-material/ShowChartOutlined';
+import TodayOutlinedIcon from '@mui/icons-material/TodayOutlined';
+import { LineChart } from '@mui/x-charts/LineChart';
+import Chrome from './Chrome';
+import ParqForm from './ParqForm';
+import { Gonio, BodyMap } from './Viz';
+import { api, useSnapshot } from '@/lib/store';
+import {
+  MUSCLES, SERVICES, ADDONS, SITE,
+  muscle, service, addon, colorOf, iso, addDays, todayIso,
+} from '@/lib/reference';
 
-type Props = { snap: any; memberId: string; refresh: () => void; toast: (s: string) => void };
+/* ---------------------------------------------------------------------------
+   Member surface.
+
+   Self-contained: it owns the snapshot poll, its own toast, and the Chrome
+   wrapper. app/member/page.tsx only hands it the id off the session cookie.
+
+   STRUCTURE RULE (CLAUDE.md "Known trap"): nothing that renders is defined
+   inside this component's body. The tab views below are plain functions that
+   return JSX and are *called*, never mounted as <View />, so the five-second
+   poll can never remount them and drop scroll position or in-progress input.
+   Anything genuinely reusable — ParqForm, the small presentational pieces
+   below — lives at module scope.
+
+   Surfaces that carry Gonio or BodyMap render on an ink Paper: both are brand
+   SVG drawn in bone-on-ink and would be invisible on MUI's white paper. This
+   is the prototype's inverted data-panel pattern that theme.ts notes is not
+   yet expressed as a Paper variant.
+--------------------------------------------------------------------------- */
+
+type TabKey = 'today' | 'home' | 'body' | 'progress' | 'book';
+
+/* Home sits second, not last — it is the thing a member opens between visits. */
+const TABS: { key: TabKey; label: string; icon: React.ReactNode }[] = [
+  { key: 'today', label: 'Today', icon: <TodayOutlinedIcon /> },
+  { key: 'home', label: 'Home', icon: <SelfImprovementOutlinedIcon /> },
+  { key: 'body', label: 'Body', icon: <AccessibilityNewOutlinedIcon /> },
+  { key: 'progress', label: 'Progress', icon: <ShowChartOutlinedIcon /> },
+  { key: 'book', label: 'Book', icon: <EventAvailableOutlinedIcon /> },
+];
+
+const METRICS = ['flexibility', 'mobility', 'recovery'] as const;
+type Metric = (typeof METRICS)[number];
+
+/* Series colours are palette roles, not sentiment, and deliberately avoid
+   warning/amber — that band is reserved for open safety flags. */
+const METRIC_COLOR: Record<Metric, (t: Theme) => string> = {
+  flexibility: (t) => t.palette.secondary.dark,
+  mobility: (t) => t.palette.success.main,
+  recovery: (t) => t.palette.primary.light,
+};
+
+const EMPTY_SNAP = {
+  members: [], coaches: [], measurements: [], assessments: [],
+  scoreDays: [], sessions: [], programs: [], bookings: [], checkins: [],
+};
 
 const fmtDate = (d: string) => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+const signed = (n: number) => `${n >= 0 ? '+' : ''}${n}`;
+/* Measured change, not sentiment: jade for gained range, clay for lost. */
+const changeColor = (n: number) => (n >= 0 ? 'success.main' : 'error.main');
+const statusChipColor = (s: string): 'secondary' | 'success' | 'default' =>
+  (s === 'confirmed' ? 'secondary' : s === 'completed' ? 'success' : 'default');
 
-export default function Member({ snap, memberId, refresh, toast }: Props) {
-  const [tab, setTab] = useState<'today' | 'body' | 'progress' | 'book' | 'home'>('today');
+/* ---------- module-scope presentational pieces ---------- */
+
+function Eyebrow({ children, onInk }: { children: React.ReactNode; onInk?: boolean }) {
+  return (
+    <Typography
+      variant="overline"
+      component="div"
+      sx={{ color: onInk ? 'primary.contrastText' : 'text.secondary', opacity: onInk ? 0.62 : 1 }}
+    >
+      {children}
+    </Typography>
+  );
+}
+
+function InkPanel({ children, sx }: { children: React.ReactNode; sx?: any }) {
+  return (
+    <Paper
+      variant="outlined"
+      sx={{ p: 2.5, bgcolor: 'primary.main', color: 'primary.contrastText', borderColor: 'primary.light', ...sx }}
+    >
+      {children}
+    </Paper>
+  );
+}
+
+function ScoreRow({ label, value, delta }: { label: string; value: number; delta: number }) {
+  return (
+    <Box>
+      <Stack direction="row" spacing={1} sx={{ alignItems: 'baseline', justifyContent: 'space-between' }}>
+        <Eyebrow onInk>{label}</Eyebrow>
+        <Typography variant="overline" sx={{ color: changeColor(delta) }}>
+          {signed(delta)} · 7d
+        </Typography>
+        <Typography variant="readout" sx={{ fontSize: '1.5rem' }}>{value}</Typography>
+      </Stack>
+      <LinearProgress
+        variant="determinate"
+        value={Math.max(0, Math.min(100, value))}
+        sx={{
+          mt: 0.5, height: 6, borderRadius: 1,
+          bgcolor: (t) => alpha(t.palette.primary.contrastText, 0.12),
+          '& .MuiLinearProgress-bar': { bgcolor: colorOf(value / 100) },
+        }}
+      />
+    </Box>
+  );
+}
+
+function PageTitle({ eyebrow, title }: { eyebrow: string; title: string }) {
+  return (
+    <Box sx={{ mb: 1 }}>
+      <Eyebrow>{eyebrow}</Eyebrow>
+      <Typography variant="h3" sx={{ mt: 0.5 }}>{title}</Typography>
+    </Box>
+  );
+}
+
+function EmptyPanel({ children }: { children: React.ReactNode }) {
+  return (
+    <Paper variant="outlined" sx={{ p: 3 }}>
+      <Typography variant="body2" sx={{ color: 'text.secondary' }}>{children}</Typography>
+    </Paper>
+  );
+}
+
+/* =========================================================================== */
+
+export default function Member({ memberId }: { memberId: string }) {
+  const theme = useTheme();
+  const { data: snap, error, refresh } = useSnapshot();
+
+  const [msg, setMsg] = useState<string | null>(null);
+  const toast = (s: string) => { setMsg(s); setTimeout(() => setMsg(null), 2800); };
+
+  const [tab, setTab] = useState<TabKey>('today');
   const [sel, setSel] = useState('hamstrings');
   const [face, setFace] = useState<'front' | 'back'>('back');
-  const [metric, setMetric] = useState<'flexibility' | 'mobility' | 'recovery'>('flexibility');
+  const [metric, setMetric] = useState<Metric>('flexibility');
   const [draft, setDraft] = useState<{ svc: string; date: string; slot: string | null; addons: string[] }>(
     { svc: 'st30', date: todayIso(), slot: null, addons: [] });
   const [slots, setSlots] = useState<any[]>([]);
+  const [parqOpen, setParqOpen] = useState(false);
+  const [referral, setReferral] = useState<string | null>(null);
 
-  const me = snap.members.find((m: any) => m.id === memberId);
-  const meas = snap.measurements.filter((m: any) => m.assessmentId === me?.latestAssessmentId);
-  const assessment = snap.assessments.find((a: any) => a.id === me?.latestAssessmentId);
-  const prevAssessment = snap.assessments.filter((a: any) => a.memberId === memberId)[1];
-  const prevMeas = snap.measurements.filter((m: any) => m.assessmentId === prevAssessment?.id);
-  const series = snap.scoreDays.filter((s: any) => s.memberId === memberId);
-  const sessions = snap.sessions.filter((s: any) => s.memberId === memberId);
-  const programs = snap.programs.filter((p: any) => p.memberId === memberId);
-  const myBookings = snap.bookings.filter((b: any) => b.memberId === memberId && !['cancelled', 'completed'].includes(b.status));
-  const next = [...myBookings].sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))[0];
-  const coachName = (id: string | null) => snap.coaches.find((c: any) => c.id === id)?.name || 'Coach to be assigned';
+  const s: any = snap ?? EMPTY_SNAP;
+
+  const me = s.members.find((m: any) => m.id === memberId);
+  const meas = s.measurements.filter((m: any) => m.assessmentId === me?.latestAssessmentId);
+  const assessment = s.assessments.find((a: any) => a.id === me?.latestAssessmentId);
+  const prevAssessment = s.assessments.filter((a: any) => a.memberId === memberId)[1];
+  const prevMeas = s.measurements.filter((m: any) => m.assessmentId === prevAssessment?.id);
+  const series = s.scoreDays.filter((x: any) => x.memberId === memberId);
+  const sessions = s.sessions.filter((x: any) => x.memberId === memberId);
+  const programs = s.programs.filter((p: any) => p.memberId === memberId);
+  const myBookings = s.bookings.filter((b: any) => b.memberId === memberId && !['cancelled', 'completed'].includes(b.status));
+  const next = [...myBookings].sort((a: any, b: any) => (a.date + a.time).localeCompare(b.date + b.time))[0];
+  const coachName = (id: string | null) => s.coaches.find((c: any) => c.id === id)?.name || 'Coach to be assigned';
 
   useEffect(() => {
     if (tab !== 'book') return;
@@ -41,354 +206,645 @@ export default function Member({ snap, memberId, refresh, toast }: Props) {
   };
 
   /* ---------- actions ---------- */
+
+  const act = async (p: Promise<any>, ok: string) => {
+    try { await p; toast(ok); refresh('MEMBER'); }
+    catch (e: any) { toast(e?.error || 'Failed'); }
+  };
+
   const book = async () => {
     try {
-      const r = await api('POST', '/bookings', { memberId, serviceId: draft.svc, date: draft.date, time: draft.slot, addons: draft.addons }, 'MEMBER');
-      toast(r.message); setDraft({ ...draft, slot: null }); setTab('today'); refresh();
-    } catch (e: any) { toast(e.error || 'Could not book'); }
+      const r = await api('POST', '/bookings',
+        { memberId, serviceId: draft.svc, date: draft.date, time: draft.slot, addons: draft.addons }, 'MEMBER');
+      toast(r.message);
+      setDraft({ ...draft, slot: null });
+      setTab('today');
+      refresh('MEMBER');
+    } catch (e: any) { toast(e?.error || 'Could not book'); }
   };
-  const act = async (fn: Promise<any>, msg: string) => { try { await fn; toast(msg); refresh(); } catch (e: any) { toast(e.error || 'Failed'); } };
 
-  /* ---------- views ---------- */
-  const Today = () => {
-    const sub = (lab: string, val: number, d: number) => (
-      <div className="sub">
-        <span className="eyebrow on-ink">{lab}</span>
-        <span className="mono" style={{ fontSize: 11, color: d >= 0 ? 'var(--lime)' : 'var(--amber)' }}>{d >= 0 ? '+' : ''}{d} · 7d</span>
-        <span className="n">{val}</span><span />
-        <div className="bar"><i style={{ width: `${val}%`, background: colorOf(val / 100) }} /></div>
-      </div>
+  const onParqCleared = () => {
+    setReferral(null);
+    setParqOpen(false);
+    toast('Screening complete — you can book now');
+    refresh('MEMBER');
+  };
+
+  /* ---------- views (plain functions, never mounted as components) ---------- */
+
+  const parqCallout = () => {
+    if (!me || me.parqCleared) return null;
+    return referral ? (
+      <Alert severity="warning" variant="outlined">
+        <AlertTitle>Check with a physician first</AlertTitle>
+        {referral}
+      </Alert>
+    ) : (
+      <Alert
+        severity="warning"
+        variant="outlined"
+        action={<Button size="small" variant="outlined" onClick={() => setParqOpen(true)}>Start screening</Button>}
+      >
+        <AlertTitle>Readiness screening outstanding</AlertTitle>
+        Seven quick questions about your health history. Booking opens as soon as they are answered.
+      </Alert>
     );
-    const priority = [...meas].map((m) => ({ ...m, pct: m.degrees / m.target })).sort((a, b) => a.pct - b.pct).slice(0, 3);
+  };
+
+  const renderToday = () => {
+    const priority = meas
+      .map((m: any) => ({ ...m, pct: m.degrees / m.target }))
+      .sort((a: any, b: any) => a.pct - b.pct)
+      .slice(0, 3);
 
     return (
-      <>
-        <div className="mhead">
-          <div><span className="eyebrow">{SITE.name}</span>
-            <h2>Morning,<br /><em>{me.name.split(' ')[0]}</em>.</h2></div>
-          <div className="streak"><b>{me.streak}</b>day streak</div>
-        </div>
+      <Stack spacing={2}>
+        <Stack direction="row" spacing={2} sx={{ alignItems: 'flex-end', justifyContent: 'space-between' }}>
+          <Box>
+            <Eyebrow>{SITE.name}</Eyebrow>
+            <Typography variant="h3" sx={{ mt: 0.5 }}>Morning, {me.name.split(' ')[0]}.</Typography>
+          </Box>
+          <Box sx={{ textAlign: 'end', flexShrink: 0 }}>
+            <Typography variant="readout" sx={{ fontSize: '1.75rem' }}>{me.streak}</Typography>
+            <Eyebrow>day streak</Eyebrow>
+          </Box>
+        </Stack>
 
         {meas.length ? (
-          <div className="panel"><div className="pad hero">
-            <Gonio pct={me.scores.flexibility / 100} size={164} label={me.scores.flexibility} sub="FLEXIBILITY" />
-            <div style={{ display: 'grid', gap: 9 }}>
-              {sub('Mobility', me.scores.mobility, delta('mobility'))}
-              {sub('Recovery', me.scores.recovery, delta('recovery'))}
-              <div className="kv">Flexibility {delta('flexibility') >= 0 ? '+' : ''}{delta('flexibility')} over 7 days</div>
-            </div>
-          </div></div>
+          <InkPanel>
+            <Grid container spacing={2} sx={{ alignItems: 'center' }}>
+              <Grid size={{ xs: 12, sm: 5 }}>
+                <Gonio pct={me.scores.flexibility / 100} size={164} label={me.scores.flexibility} sub="FLEXIBILITY" />
+              </Grid>
+              <Grid size={{ xs: 12, sm: 7 }}>
+                <Stack spacing={1.5}>
+                  <ScoreRow label="Mobility" value={me.scores.mobility} delta={delta('mobility')} />
+                  <ScoreRow label="Recovery" value={me.scores.recovery} delta={delta('recovery')} />
+                  <Typography variant="body2" sx={{ opacity: 0.7 }}>
+                    Flexibility {signed(delta('flexibility'))} over 7 days
+                  </Typography>
+                </Stack>
+              </Grid>
+            </Grid>
+          </InkPanel>
         ) : (
-          <div className="panel"><div className="pad">
-            <span className="eyebrow on-ink">No assessment yet</span>
-            <div className="big" style={{ fontSize: 26, margin: '10px 0 10px' }}>Your numbers start at your first session.</div>
-            <div className="kv" style={{ lineHeight: 1.6 }}>
+          <InkPanel>
+            <Eyebrow onInk>No assessment yet</Eyebrow>
+            <Typography variant="h4" sx={{ mt: 1, mb: 1 }}>Your numbers start at your first session.</Typography>
+            <Typography variant="body2" sx={{ opacity: 0.7 }}>
               A coach measures ten muscle groups in about eight minutes. After that, every screen here has data in it.
-            </div>
-          </div></div>
+            </Typography>
+          </InkPanel>
         )}
 
-        <div className="stack">
-          {next ? (
-            <div className="panel"><div className="pad">
-              <div className="row"><span className="eyebrow on-ink">Next session</span>
-                <span className={`pill ${next.status === 'confirmed' ? 's-optimal' : 's-limited'}`}>{next.status}</span></div>
-              <div className="big" style={{ fontSize: 25, margin: '8px 0 4px' }}>{service(next.serviceId).name}</div>
-              <div className="kv">{fmtDate(next.date)} · {next.time} · {service(next.serviceId).mins} min · {coachName(next.coachId)}</div>
-              <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
-                <button className="btn line sm" onClick={() => act(
-                  api('POST', '/checkins', { memberId, sleep: 3, pain: 5, areas: ['lower back', 'right shoulder'], note: 'Slept badly, shoulder stiff.' }, 'MEMBER'),
-                  'Check-in sent to your coach')}>Pre-session check-in</button>
-                <button className="btn line sm" onClick={() => act(api('DELETE', `/bookings/${next.id}`, undefined, 'MEMBER'), 'Session cancelled')}>Cancel</button>
-              </div>
-            </div></div>
-          ) : (
-            <div className="panel"><div className="pad">
-              <span className="eyebrow on-ink">Nothing booked</span>
-              <div className="big" style={{ fontSize: 23, margin: '8px 0 14px' }}>
-                {sessions.length ? 'Your last session was ' + fmtDate(sessions[0].completedAt) + '.' : 'Book your first session.'}
-              </div>
-              <button className="btn" onClick={() => setTab('book')}>Book a session</button>
-            </div></div>
-          )}
+        {parqCallout()}
 
-          {!me.parqCleared && (
-            <div className="panel"><div className="pad">
-              <span className="eyebrow on-ink">Before you start</span>
-              <div className="big" style={{ fontSize: 21, margin: '8px 0 8px' }}>Readiness screening outstanding.</div>
-              <div className="kv" style={{ lineHeight: 1.6 }}>
-                Seven quick questions about your health history. A coach completes it with you at the studio. If anything
-                needs a doctor first, we will tell you rather than work around it.
-              </div>
-            </div></div>
-          )}
+        {next ? (
+          <Paper variant="outlined" sx={{ p: 2.5 }}>
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
+              <Eyebrow>Next session</Eyebrow>
+              <Chip size="small" label={next.status} color={statusChipColor(next.status)} />
+            </Stack>
+            <Typography variant="h5" sx={{ mt: 1 }}>{service(next.serviceId).name}</Typography>
+            <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
+              {fmtDate(next.date)} · {next.time} · {service(next.serviceId).mins} min · {coachName(next.coachId)}
+            </Typography>
+            <Stack direction="row" spacing={1} sx={{ mt: 2, flexWrap: 'wrap' }}>
+              <Button
+                variant="outlined"
+                onClick={() => act(api('POST', '/checkins', {
+                  memberId, sleep: 3, pain: 5,
+                  areas: ['lower back', 'right shoulder'],
+                  note: 'Slept badly, shoulder stiff.',
+                }, 'MEMBER'), 'Check-in sent to your coach')}
+              >
+                Pre-session check-in
+              </Button>
+              <Button
+                variant="text"
+                onClick={() => act(api('DELETE', `/bookings/${next.id}`, undefined, 'MEMBER'), 'Session cancelled')}
+              >
+                Cancel
+              </Button>
+            </Stack>
+          </Paper>
+        ) : (
+          <Paper variant="outlined" sx={{ p: 2.5 }}>
+            <Eyebrow>Nothing booked</Eyebrow>
+            <Typography variant="h5" sx={{ mt: 1, mb: 2 }}>
+              {sessions.length ? `Your last session was ${fmtDate(sessions[0].completedAt)}.` : 'Book your first session.'}
+            </Typography>
+            <Button variant="contained" onClick={() => setTab('book')}>Book a session</Button>
+          </Paper>
+        )}
 
-          {priority.length > 0 && (
-            <div className="panel"><div className="pad">
-              <div className="row"><span className="eyebrow on-ink">Priority areas today</span>
-                <button className="kv" style={{ color: 'var(--lime)' }} onClick={() => setTab('body')}>Full body map →</button></div>
-              <div className="rowlist" style={{ marginTop: 6 }}>
-                {priority.map((p: any) => (
-                  <div key={p.muscleKey} onClick={() => { setSel(p.muscleKey); setFace(muscle(p.muscleKey).face); setTab('body'); }}>
-                    <span style={{ height: 22, background: colorOf(p.pct), borderRadius: 2 }} />
-                    <div><b style={{ fontFamily: 'var(--dsp)', fontSize: 16 }}>{muscle(p.muscleKey).label}</b>
-                      <div className="kv">{muscle(p.muscleKey).region} · {Math.round(p.pct * 100)}% of target arc</div></div>
-                    <span className="mono" style={{ fontSize: 15 }}>{p.degrees}°</span>
-                  </div>
-                ))}
-              </div>
-            </div></div>
-          )}
-
-          <div className="panel"><div className="pad">
-            <span className="eyebrow on-ink">Data streams</span>
-            <div className="big" style={{ fontSize: 21, margin: '8px 0 6px' }}>
-              {me.wearable ? `Connected — ${me.wearable}` : 'Sharpen your recovery score'}</div>
-            <div className="kv" style={{ lineHeight: 1.6 }}>
-              Add heart-rate variability, sleep and strain from your wearable. Recovery becomes measured rather than estimated.
-            </div>
-            <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
-              {['whoop', 'apple'].map((p) => (
-                <button key={p} className="btn line sm" onClick={() => act(
-                  api('POST', `/members/${memberId}/wearable`, { provider: p }, 'MEMBER'), `${p} connected`)}>
-                  {p === 'whoop' ? 'Whoop' : 'Apple Health'}</button>
+        {priority.length > 0 && (
+          <Paper variant="outlined" sx={{ p: 2.5 }}>
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
+              <Eyebrow>Priority areas today</Eyebrow>
+              <Button variant="text" size="small" onClick={() => setTab('body')}>Full body map</Button>
+            </Stack>
+            <List disablePadding sx={{ mt: 1 }}>
+              {priority.map((p: any) => (
+                <ListItemButton
+                  key={p.muscleKey}
+                  onClick={() => { setSel(p.muscleKey); setFace(muscle(p.muscleKey).face); setTab('body'); }}
+                  sx={{ px: 1, gap: 2 }}
+                >
+                  <Box sx={{ width: 4, alignSelf: 'stretch', borderRadius: 1, bgcolor: colorOf(p.pct) }} />
+                  <Box sx={{ flex: 1 }}>
+                    <Typography variant="subtitle2">{muscle(p.muscleKey).label}</Typography>
+                    <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                      {muscle(p.muscleKey).region} · {Math.round(p.pct * 100)}% of target arc
+                    </Typography>
+                  </Box>
+                  <Typography variant="readout" sx={{ fontSize: '1.125rem' }}>{p.degrees}°</Typography>
+                </ListItemButton>
               ))}
-            </div>
-          </div></div>
-        </div>
-      </>
+            </List>
+          </Paper>
+        )}
+
+        <Paper variant="outlined" sx={{ p: 2.5 }}>
+          <Eyebrow>Data streams</Eyebrow>
+          <Typography variant="h5" sx={{ mt: 1 }}>
+            {me.wearable ? `Connected — ${me.wearable}` : 'Sharpen your recovery score'}
+          </Typography>
+          <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
+            Add heart-rate variability, sleep and strain from your wearable. Recovery becomes measured rather than estimated.
+          </Typography>
+          <Stack direction="row" spacing={2} sx={{ mt: 1, flexWrap: 'wrap' }}>
+            {[{ id: 'whoop', label: 'Whoop' }, { id: 'apple', label: 'Apple Health' }].map((p) => {
+              const on = me.wearable === p.id;
+              return (
+                <FormControlLabel
+                  key={p.id}
+                  label={p.label}
+                  control={
+                    <Checkbox
+                      checked={on}
+                      disabled={on}
+                      onChange={() => act(
+                        api('POST', `/members/${memberId}/wearable`, { provider: p.id }, 'MEMBER'),
+                        `${p.label} connected`,
+                      )}
+                    />
+                  }
+                />
+              );
+            })}
+          </Stack>
+        </Paper>
+      </Stack>
     );
   };
 
-  const Body = () => {
-    if (!meas.length) return (
-      <>
-        <h2 style={{ fontSize: 34, margin: '6px 0 16px' }}>Range of Motion</h2>
-        <div className="panel"><div className="pad kv" style={{ lineHeight: 1.7 }}>
-          Nothing measured yet. Your coach captures ten joint angles at your first session and this map fills in.
-        </div></div>
-      </>
-    );
+  const renderBody = () => {
+    if (!meas.length) {
+      return (
+        <Stack spacing={2}>
+          <PageTitle eyebrow="Range of motion" title="Body map" />
+          <EmptyPanel>
+            Nothing measured yet. Your coach captures ten joint angles at your first session and this map fills in.
+          </EmptyPanel>
+        </Stack>
+      );
+    }
+
     const m = meas.find((x: any) => x.muscleKey === sel) || meas[0];
     const info = muscle(m.muscleKey);
     const pv = prevMeas.find((x: any) => x.muscleKey === m.muscleKey);
     const drift = pv ? m.degrees - pv.degrees : null;
+
     return (
-      <>
-        <span className="eyebrow">Assessment · {assessment?.capturedAt} · {assessment?.source === 'bodymap' ? 'BodyMap device' : 'coach entry'}</span>
-        <h2 style={{ fontSize: 34, margin: '6px 0 16px' }}>Range of Motion</h2>
-        <div className="panel"><div className="pad">
-          <div className="row"><span className="eyebrow on-ink">Whole-body map</span>
-            <div className="seg">
-              {(['front', 'back'] as const).map((f) => (
-                <button key={f} aria-pressed={face === f} onClick={() => setFace(f)}>{f}</button>))}
-            </div></div>
+      <Stack spacing={2}>
+        <PageTitle
+          eyebrow={`Assessment · ${assessment?.capturedAt} · ${assessment?.source === 'bodymap' ? 'BodyMap device' : 'coach entry'}`}
+          title="Range of motion"
+        />
+
+        <InkPanel>
+          <Stack direction="row" spacing={1} sx={{ mb: 1, alignItems: 'center', justifyContent: 'space-between' }}>
+            <Eyebrow onInk>Whole-body map</Eyebrow>
+            <ToggleButtonGroup
+              size="small"
+              exclusive
+              value={face}
+              onChange={(_, v) => v && setFace(v)}
+              sx={{ '& .MuiToggleButton-root': { color: 'primary.contrastText', borderColor: 'primary.light' } }}
+            >
+              <ToggleButton value="front">Front</ToggleButton>
+              <ToggleButton value="back">Back</ToggleButton>
+            </ToggleButtonGroup>
+          </Stack>
           <BodyMap face={face} measurements={meas} selected={sel} onSelect={setSel} />
-          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', justifyContent: 'center', marginTop: 6 }}>
-            {['restricted', 'limited', 'optimal', 'excellent'].map((s) => (
-              <span key={s} className={`pill s-${s}`} style={{ border: 'none' }}>●&nbsp;{s}</span>))}
-          </div>
-        </div></div>
+          <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: 'wrap', justifyContent: 'center' }}>
+            {[
+              { k: 'restricted', p: 0.4 }, { k: 'limited', p: 0.7 },
+              { k: 'optimal', p: 0.8 }, { k: 'excellent', p: 0.95 },
+            ].map((b) => (
+              <Chip
+                key={b.k}
+                size="small"
+                label={b.k}
+                sx={{ bgcolor: colorOf(b.p), color: 'primary.main' }}
+              />
+            ))}
+          </Stack>
+        </InkPanel>
 
-        <div className="panel" style={{ marginTop: 14 }}><div className="pad">
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 126px', gap: 12, alignItems: 'center' }}>
-            <div>
-              <span className="eyebrow on-ink">{info.region} region</span>
-              <div className="big" style={{ fontSize: 28, margin: '6px 0 8px' }}>{info.label}</div>
-              <div className="kv" style={{ lineHeight: 1.6, color: '#B6BCA9' }}>{info.note}</div>
-              {drift !== null && <div className="kv" style={{ marginTop: 10, color: drift >= 0 ? 'var(--lime)' : 'var(--amber)' }}>
-                {drift >= 0 ? '+' : ''}{drift}° since {prevAssessment.capturedAt}</div>}
-            </div>
-            <Gonio pct={m.degrees / m.target} size={126} label={`${m.degrees}°`} sub={`OF ${m.target}°`} />
-          </div>
-        </div></div>
+        <InkPanel>
+          <Grid container spacing={2} sx={{ alignItems: 'center' }}>
+            <Grid size={{ xs: 12, sm: 7 }}>
+              <Eyebrow onInk>{info.region} region</Eyebrow>
+              <Typography variant="h4" sx={{ mt: 0.5, mb: 1 }}>{info.label}</Typography>
+              <Typography variant="body2" sx={{ opacity: 0.7 }}>{info.note}</Typography>
+              {drift !== null && (
+                <Typography variant="overline" sx={{ display: 'block', mt: 1.5, color: changeColor(drift) }}>
+                  {signed(drift)}° since {prevAssessment.capturedAt}
+                </Typography>
+              )}
+            </Grid>
+            <Grid size={{ xs: 12, sm: 5 }}>
+              <Gonio pct={m.degrees / m.target} size={140} label={`${m.degrees}°`} sub={`OF ${m.target}°`} />
+            </Grid>
+          </Grid>
+        </InkPanel>
 
-        <div className="panel" style={{ marginTop: 14 }}><div className="pad">
-          <span className="eyebrow on-ink">All groups</span>
-          <div className="rowlist" style={{ marginTop: 6 }}>
-            {MUSCLES.map((mu) => {
-              const x = meas.find((y: any) => y.muscleKey === mu.key); if (!x) return null;
-              const p = x.degrees / x.target;
-              return (
-                <div key={mu.key} onClick={() => { setSel(mu.key); setFace(mu.face); }}>
-                  <span style={{ height: 26, background: colorOf(p), borderRadius: 2 }} />
-                  <div><b style={{ fontFamily: 'var(--dsp)', fontSize: 15 }}>{mu.label}</b><div className="kv">{mu.region}</div></div>
-                  <div style={{ textAlign: 'right' }}>
-                    <div className="mono" style={{ fontSize: 14 }}>{x.degrees}° / {x.target}°</div>
-                    <div className="kv">{Math.round(p * 100)}%</div></div>
-                </div>);
-            })}
-          </div>
-        </div></div>
-      </>
+        <Paper variant="outlined">
+          <Box sx={{ p: 2.5, pb: 0 }}><Eyebrow>All groups</Eyebrow></Box>
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Group</TableCell>
+                  <TableCell align="right">Measured</TableCell>
+                  <TableCell align="right">Target</TableCell>
+                  <TableCell align="right">Of target</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {MUSCLES.map((mu) => {
+                  const x = meas.find((y: any) => y.muscleKey === mu.key);
+                  if (!x) return null;
+                  const p = x.degrees / x.target;
+                  return (
+                    <TableRow
+                      key={mu.key}
+                      hover
+                      selected={sel === mu.key}
+                      onClick={() => { setSel(mu.key); setFace(mu.face); }}
+                      sx={{ cursor: 'pointer' }}
+                    >
+                      <TableCell>
+                        <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
+                          <Box sx={{ width: 4, height: 24, borderRadius: 1, bgcolor: colorOf(p) }} />
+                          <Box>
+                            <Typography variant="subtitle2">{mu.label}</Typography>
+                            <Typography variant="body2" sx={{ color: 'text.secondary' }}>{mu.region}</Typography>
+                          </Box>
+                        </Stack>
+                      </TableCell>
+                      <TableCell align="right">{x.degrees}°</TableCell>
+                      <TableCell align="right">{x.target}°</TableCell>
+                      <TableCell align="right">{Math.round(p * 100)}%</TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Paper>
+      </Stack>
     );
   };
 
-  const Progress = () => {
+  const renderProgress = () => {
     const cur = series.length ? series[series.length - 1][metric] : 0;
     const start = series.length ? series[0][metric] : 0;
+    const labels = series.map((x: any) => String(x.date));
+    const every = Math.max(1, Math.floor(labels.length / 7));
+
+    const stat = (label: string, value: number, color?: string) => (
+      <Box>
+        <Eyebrow>{label}</Eyebrow>
+        <Typography variant="readout" sx={{ color: color ?? 'text.primary' }}>{value}</Typography>
+      </Box>
+    );
+
     return (
-      <>
-        <span className="eyebrow">Longitudinal · {series.length} days on record</span>
-        <h2 style={{ fontSize: 34, margin: '6px 0 16px' }}>Progress</h2>
-        <div className="panel"><div className="pad">
-          <div className="chipline">
-            {(['flexibility', 'mobility', 'recovery'] as const).map((k) => (
-              <button key={k} className="chip" aria-pressed={metric === k} onClick={() => setMetric(k)}>{k}</button>))}
-          </div>
-          <div style={{ display: 'flex', gap: 28, margin: '16px 0 6px' }}>
-            <div><span className="eyebrow on-ink">Now</span><div className="big" style={{ fontSize: 32 }}>{cur}</div></div>
-            <div><span className="eyebrow on-ink">At start</span><div className="big" style={{ fontSize: 32, color: 'var(--mute-ink)' }}>{start}</div></div>
-            <div><span className="eyebrow on-ink">Change</span>
-              <div className="big" style={{ fontSize: 32, color: cur - start >= 0 ? 'var(--lime)' : 'var(--amber)' }}>
-                {cur - start >= 0 ? '+' : ''}{cur - start}</div></div>
-          </div>
-          <AreaChart series={series} keys={[metric]} />
-        </div></div>
+      <Stack spacing={2}>
+        <PageTitle eyebrow={`Longitudinal · ${series.length} days on record`} title="Progress" />
 
-        <div className="panel" style={{ marginTop: 14 }}><div className="pad">
-          <span className="eyebrow on-ink">All three compared</span>
-          <AreaChart series={series} keys={['flexibility', 'mobility', 'recovery']} height={150} />
-          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-            {['Flexibility', 'Mobility', 'Recovery'].map((n, i) => (
-              <span key={n} className="kv">
-                <span style={{ display: 'inline-block', width: 14, height: 2, background: ['#A9E34B', '#43B07C', '#E0A33C'][i], verticalAlign: 'middle' }} /> {n}
-              </span>))}
-          </div>
-        </div></div>
+        <Paper variant="outlined" sx={{ p: 2.5 }}>
+          <ToggleButtonGroup size="small" exclusive value={metric} onChange={(_, v) => v && setMetric(v)}>
+            {METRICS.map((k) => <ToggleButton key={k} value={k}>{k}</ToggleButton>)}
+          </ToggleButtonGroup>
 
-        <div className="panel" style={{ marginTop: 14 }}><div className="pad">
-          <span className="eyebrow on-ink">Session history · {sessions.length} logged</span>
-          <div style={{ display: 'grid', gap: 12, marginTop: 12 }}>
-            {sessions.length ? sessions.slice(0, 8).map((s: any) => (
-              <div key={s.id} style={{ padding: 13, borderRadius: 3, background: 'rgba(237,235,226,.045)', boxShadow: 'inset 0 0 0 1px rgba(237,235,226,.09)' }}>
-                <div className="row"><b style={{ fontFamily: 'var(--dsp)', fontSize: 16 }}>{s.mins} min · {s.modalities.join(' + ')}</b>
-                  <span className="kv">{s.completedAt}</span></div>
-                <div className="kv" style={{ margin: '6px 0 9px' }}>
-                  {coachName(s.coachId)} · RPE {s.rpe} · pain {s.painBefore}→{s.painAfter}</div>
-                <div style={{ fontSize: 14, lineHeight: 1.55, color: '#D4D8C7' }}>{s.memberSummary}</div>
-              </div>)) : <div className="kv">No sessions yet. Your coach&apos;s summary appears here after the first one.</div>}
-          </div>
-        </div></div>
-      </>
+          <Stack direction="row" spacing={4} sx={{ mt: 2 }}>
+            {stat('Now', cur)}
+            {stat('At start', start, 'text.secondary')}
+            <Box>
+              <Eyebrow>Change</Eyebrow>
+              <Typography variant="readout" sx={{ color: changeColor(cur - start) }}>
+                {signed(cur - start)}
+              </Typography>
+            </Box>
+          </Stack>
+
+          {series.length ? (
+            <LineChart
+              height={240}
+              margin={{ top: 16, bottom: 8, left: 8, right: 8 }}
+              xAxis={[{
+                data: labels,
+                scaleType: 'point',
+                tickLabelInterval: (_v: any, i: number) => i % every === 0 || i === labels.length - 1,
+                valueFormatter: (v: any) => String(v).slice(5),
+              }]}
+              yAxis={[{ min: 30, max: 100 }]}
+              grid={{ horizontal: true }}
+              hideLegend
+              series={[{
+                data: series.map((x: any) => x[metric] as number),
+                label: metric,
+                area: true,
+                showMark: false,
+                curve: 'monotoneX',
+                color: METRIC_COLOR[metric](theme),
+              }]}
+              sx={{ '& .MuiAreaElement-root': { fillOpacity: 0.18 } }}
+            />
+          ) : (
+            <Box sx={{ mt: 2 }}>
+              <EmptyPanel>No history yet. The line starts after your first assessment.</EmptyPanel>
+            </Box>
+          )}
+        </Paper>
+
+        {series.length > 0 && (
+          <Paper variant="outlined" sx={{ p: 2.5 }}>
+            <Eyebrow>All three compared</Eyebrow>
+            <LineChart
+              height={200}
+              margin={{ top: 16, bottom: 8, left: 8, right: 8 }}
+              xAxis={[{
+                data: labels,
+                scaleType: 'point',
+                tickLabelInterval: (_v: any, i: number) => i % every === 0 || i === labels.length - 1,
+                valueFormatter: (v: any) => String(v).slice(5),
+              }]}
+              yAxis={[{ min: 30, max: 100 }]}
+              grid={{ horizontal: true }}
+              series={METRICS.map((k) => ({
+                data: series.map((x: any) => x[k] as number),
+                label: k,
+                showMark: false,
+                curve: 'monotoneX',
+                color: METRIC_COLOR[k](theme),
+              }))}
+            />
+          </Paper>
+        )}
+
+        <Paper variant="outlined" sx={{ p: 2.5 }}>
+          <Eyebrow>Session history · {sessions.length} logged</Eyebrow>
+          <Stack spacing={1.5} sx={{ mt: 1.5 }}>
+            {sessions.length ? sessions.slice(0, 8).map((x: any) => (
+              <Paper key={x.id} variant="outlined" sx={{ p: 2, bgcolor: 'background.default' }}>
+                <Stack direction="row" spacing={1} sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
+                  <Typography variant="subtitle2">{x.mins} min · {x.modalities.join(' + ')}</Typography>
+                  <Typography variant="overline" sx={{ color: 'text.secondary' }}>{x.completedAt}</Typography>
+                </Stack>
+                <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
+                  {coachName(x.coachId)} · RPE {x.rpe} · pain {x.painBefore}→{x.painAfter}
+                </Typography>
+                <Typography variant="body2" sx={{ mt: 1 }}>{x.memberSummary}</Typography>
+              </Paper>
+            )) : (
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                No sessions yet. Your coach&apos;s summary appears here after the first one.
+              </Typography>
+            )}
+          </Stack>
+        </Paper>
+      </Stack>
     );
   };
 
-  const Book = () => {
+  const renderBook = () => {
     const sv = service(draft.svc);
-    const total = sv.aed + draft.addons.reduce((s, a) => s + addon(a).aed, 0);
+    const total = sv.aed + draft.addons.reduce((n, a) => n + addon(a).aed, 0);
     const dates = [...Array(7)].map((_, i) => addDays(new Date(), i));
+
     return (
-      <>
-        <span className="eyebrow">{SITE.name}</span>
-        <h2 style={{ fontSize: 34, margin: '6px 0 16px' }}>Book a session</h2>
-        {!me.parqCleared && (
-          <div className="flag" style={{ marginBottom: 14, color: 'var(--on-bone)', background: 'rgba(210,83,42,.16)' }}>
-            <span><b>Screening needed.</b> Complete your readiness questionnaire with a coach before your first session.</span>
-          </div>)}
-        <div className="panel"><div className="pad">
-          <span className="eyebrow on-ink">Service</span>
-          <div style={{ display: 'grid', gap: 8, marginTop: 10 }}>
-            {SERVICES.map((s) => (
-              <button key={s.id} className="svc" aria-pressed={draft.svc === s.id}
-                      onClick={() => setDraft({ ...draft, svc: s.id, slot: null })}>
-                <b>{s.name}</b><span className="p">AED {s.aed}</span><small>{s.mins} min · {s.desc}</small>
-              </button>))}
-          </div>
+      <Stack spacing={2}>
+        <PageTitle eyebrow={SITE.name} title="Book a session" />
 
-          <div style={{ marginTop: 18 }}><span className="eyebrow on-ink">Date</span>
-            <div className="chipline" style={{ marginTop: 9 }}>
+        {parqCallout()}
+
+        <Paper variant="outlined" sx={{ p: 2.5 }}>
+          <Eyebrow>Service</Eyebrow>
+          <ToggleButtonGroup
+            orientation="vertical"
+            exclusive
+            fullWidth
+            value={draft.svc}
+            onChange={(_, v) => v && setDraft({ ...draft, svc: v, slot: null })}
+            sx={{ mt: 1 }}
+          >
+            {SERVICES.map((x) => (
+              <ToggleButton key={x.id} value={x.id} sx={{ textAlign: 'start', display: 'block', px: 2, py: 1.5 }}>
+                <Stack direction="row" spacing={2} sx={{ alignItems: 'baseline', justifyContent: 'space-between' }}>
+                  <Typography variant="subtitle2">{x.name}</Typography>
+                  <Typography variant="overline">AED {x.aed}</Typography>
+                </Stack>
+                <Typography variant="body2" sx={{ color: 'text.secondary', textTransform: 'none' }}>
+                  {x.mins} min · {x.desc}
+                </Typography>
+              </ToggleButton>
+            ))}
+          </ToggleButtonGroup>
+
+          <Box sx={{ mt: 3 }}>
+            <Eyebrow>Date</Eyebrow>
+            <ToggleButtonGroup
+              size="small"
+              exclusive
+              value={draft.date}
+              onChange={(_, v) => v && setDraft({ ...draft, date: v, slot: null })}
+              sx={{ mt: 1, flexWrap: 'wrap' }}
+            >
               {dates.map((d) => (
-                <button key={iso(d)} className="chip" aria-pressed={draft.date === iso(d)}
-                        onClick={() => setDraft({ ...draft, date: iso(d), slot: null })}>
-                  {d.toLocaleDateString('en-GB', { weekday: 'short' }).toUpperCase()} {d.getDate()}
-                </button>))}
-            </div></div>
+                <ToggleButton key={iso(d)} value={iso(d)}>
+                  {d.toLocaleDateString('en-GB', { weekday: 'short' })} {d.getDate()}
+                </ToggleButton>
+              ))}
+            </ToggleButtonGroup>
+          </Box>
 
-          <div style={{ marginTop: 18 }}><span className="eyebrow on-ink">Time</span>
-            <div className="slots" style={{ marginTop: 9 }}>
-              {slots.map((s) => (
-                <button key={s.time} className="slot" disabled={s.busy} aria-pressed={draft.slot === s.time}
-                        onClick={() => setDraft({ ...draft, slot: s.time })}>{s.time}</button>))}
-            </div></div>
+          <Box sx={{ mt: 3 }}>
+            <Eyebrow>Time</Eyebrow>
+            {slots.length ? (
+              <ToggleButtonGroup
+                size="small"
+                exclusive
+                value={draft.slot}
+                onChange={(_, v) => v && setDraft({ ...draft, slot: v })}
+                sx={{ mt: 1, flexWrap: 'wrap' }}
+              >
+                {slots.map((x) => (
+                  <ToggleButton key={x.time} value={x.time} disabled={x.busy}>{x.time}</ToggleButton>
+                ))}
+              </ToggleButtonGroup>
+            ) : (
+              <Typography variant="body2" sx={{ color: 'text.secondary', mt: 1 }}>
+                No times on this date. Try another day.
+              </Typography>
+            )}
+          </Box>
 
-          <div style={{ marginTop: 18 }}><span className="eyebrow on-ink">Add-ons</span>
-            <div className="checks" style={{ marginTop: 9 }}>
+          <Box sx={{ mt: 3 }}>
+            <Eyebrow>Add-ons</Eyebrow>
+            <Stack sx={{ mt: 0.5 }}>
               {ADDONS.map((a) => (
-                <label key={a.id}>
-                  <input type="checkbox" checked={draft.addons.includes(a.id)}
-                         onChange={() => setDraft({ ...draft, addons: draft.addons.includes(a.id) ? draft.addons.filter((x) => x !== a.id) : [...draft.addons, a.id] })} />
-                  {a.name} · AED {a.aed}
-                </label>))}
-            </div></div>
+                <FormControlLabel
+                  key={a.id}
+                  label={`${a.name} · AED ${a.aed}`}
+                  control={
+                    <Checkbox
+                      checked={draft.addons.includes(a.id)}
+                      onChange={() => setDraft({
+                        ...draft,
+                        addons: draft.addons.includes(a.id)
+                          ? draft.addons.filter((x) => x !== a.id)
+                          : [...draft.addons, a.id],
+                      })}
+                    />
+                  }
+                />
+              ))}
+            </Stack>
+          </Box>
 
-          <div className="row" style={{ marginTop: 22, paddingTop: 16, borderTop: '1px solid rgba(237,235,226,.12)' }}>
-            <div><span className="eyebrow on-ink">Total</span>
-              <div className="big" style={{ fontSize: 27 }}>AED {total}</div>
-              <div className="kv">{me.credits} session credits on account</div></div>
-            <button className="btn" disabled={!draft.slot || !me.parqCleared} onClick={book}>Request session</button>
-          </div>
-        </div></div>
-      </>
+          <Divider sx={{ my: 2.5 }} />
+
+          <Stack direction="row" spacing={2} sx={{ alignItems: 'flex-end', justifyContent: 'space-between' }}>
+            <Box>
+              <Eyebrow>Total</Eyebrow>
+              <Typography variant="readout">AED {total}</Typography>
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                {me.credits} session credits on account
+              </Typography>
+            </Box>
+            <Button variant="contained" disabled={!draft.slot || !me.parqCleared} onClick={book}>
+              Request session
+            </Button>
+          </Stack>
+        </Paper>
+      </Stack>
     );
   };
 
-  const Home = () => (
-    <>
-      <span className="eyebrow">Prescribed by your coach</span>
-      <h2 style={{ fontSize: 34, margin: '6px 0 16px' }}>Home programme</h2>
+  const renderHome = () => (
+    <Stack spacing={2}>
+      <PageTitle eyebrow="Prescribed by your coach" title="Home programme" />
       {programs.length ? programs.map((p: any) => {
         const doneToday = p.completions.includes(todayIso());
         return (
-          <div className="panel" key={p.id} style={{ marginBottom: 14 }}><div className="pad">
-            <div className="row">
-              <div><span className="eyebrow on-ink">Assigned {p.assignedAt} · {coachName(p.coachId)}</span>
-                <div className="big" style={{ fontSize: 23, marginTop: 6 }}>{p.title}</div></div>
-              <div style={{ textAlign: 'right' }}><div className="big" style={{ fontSize: 30 }}>{p.completions.length}</div>
-                <span className="eyebrow on-ink">Done</span></div>
-            </div>
-            <div className="rowlist" style={{ marginTop: 10 }}>
+          <Paper key={p.id} variant="outlined" sx={{ p: 2.5 }}>
+            <Stack direction="row" spacing={2} sx={{ alignItems: 'flex-start', justifyContent: 'space-between' }}>
+              <Box>
+                <Eyebrow>Assigned {p.assignedAt} · {coachName(p.coachId)}</Eyebrow>
+                <Typography variant="h5" sx={{ mt: 0.5 }}>{p.title}</Typography>
+              </Box>
+              <Box sx={{ textAlign: 'end', flexShrink: 0 }}>
+                <Typography variant="readout" sx={{ fontSize: '1.75rem' }}>{p.completions.length}</Typography>
+                <Eyebrow>done</Eyebrow>
+              </Box>
+            </Stack>
+
+            <Stack sx={{ mt: 1.5 }}>
               {p.moves.map((mv: any, i: number) => (
-                <div key={i} style={{ cursor: 'default' }}>
-                  <span className="mono" style={{ color: 'var(--lime)', fontSize: 11 }}>{String(i + 1).padStart(2, '0')}</span>
-                  <div><b style={{ fontFamily: 'var(--dsp)', fontSize: 16 }}>{mv.n}</b><div className="kv">{mv.d}</div></div>
-                  <span />
-                </div>))}
-            </div>
-            <button className="btn" style={{ marginTop: 16, width: '100%' }} disabled={doneToday}
-                    onClick={() => act(api('POST', `/programs/${p.id}/complete`, {}, 'MEMBER'), 'Logged for today')}>
-              {doneToday ? 'Logged for today' : 'Mark today complete'}</button>
-          </div></div>);
+                <Box key={i} sx={{ display: 'flex', gap: 2, py: 1, borderBlockStart: i ? '1px solid' : 'none', borderColor: 'divider' }}>
+                  <Typography variant="overline" sx={{ color: 'text.secondary' }}>
+                    {String(i + 1).padStart(2, '0')}
+                  </Typography>
+                  <Box>
+                    <Typography variant="subtitle2">{mv.n}</Typography>
+                    <Typography variant="body2" sx={{ color: 'text.secondary' }}>{mv.d}</Typography>
+                  </Box>
+                </Box>
+              ))}
+            </Stack>
+
+            <FormControlLabel
+              sx={{ mt: 1 }}
+              label={doneToday ? 'Logged for today' : 'Mark today complete'}
+              control={
+                <Checkbox
+                  checked={doneToday}
+                  disabled={doneToday}
+                  onChange={() => act(api('POST', `/programs/${p.id}/complete`, {}, 'MEMBER'), 'Logged for today')}
+                />
+              }
+            />
+          </Paper>
+        );
       }) : (
-        <div className="panel"><div className="pad kv" style={{ lineHeight: 1.7 }}>
-          Nothing prescribed yet. Your coach assigns a home block after your next session — usually three or four moves that
-          take under ten minutes.
-        </div></div>)}
-    </>
+        <EmptyPanel>
+          Nothing prescribed yet. Your coach assigns a home block after your next session — usually three or four moves
+          that take under ten minutes.
+        </EmptyPanel>
+      )}
+    </Stack>
   );
 
-  /* Called as plain functions, not rendered as <Component />. Defining a
-     component inside another gives it a new identity on every render, which
-     makes React unmount and remount it — losing any state and scroll position
-     every time the 5-second poll lands. */
   const body = () => {
-    if (!me) return <div className="kv on-bone">Member not found.</div>;
+    if (error) return <Alert severity="error">{error}</Alert>;
+    if (!snap) return <Typography variant="overline" sx={{ color: 'text.secondary' }}>Loading…</Typography>;
+    if (!me) return <Alert severity="error">We could not find that member account.</Alert>;
     switch (tab) {
-      case 'today': return Today();
-      case 'body': return Body();
-      case 'progress': return Progress();
-      case 'book': return Book();
-      case 'home': return Home();
+      case 'today': return renderToday();
+      case 'home': return renderHome();
+      case 'body': return renderBody();
+      case 'progress': return renderProgress();
+      case 'book': return renderBook();
     }
   };
 
   return (
-    <>
-      <div className="member">{body()}</div>
-      <nav className="mtabs">
-        {(['today', 'body', 'progress', 'book', 'home'] as const).map((k) => (
-          <button key={k} aria-pressed={tab === k} onClick={() => setTab(k)}>{k}</button>))}
-      </nav>
-    </>
+    <Chrome current="member" label={me?.name ?? 'Member'} snap={snap ?? EMPTY_SNAP} refresh={refresh} msg={msg}>
+      <Container
+        maxWidth="sm"
+        sx={{ py: 3, paddingBlockEnd: (t) => `calc(${t.spacing(12)} + env(safe-area-inset-bottom))` }}
+      >
+        {body()}
+      </Container>
+
+      <Paper
+        variant="outlined"
+        sx={{
+          position: 'fixed', insetBlockEnd: 0, insetInline: 0,
+          zIndex: (t) => t.zIndex.appBar,
+          borderRadius: 0, borderBlockEnd: 'none', borderInline: 'none',
+          pb: 'env(safe-area-inset-bottom)',
+        }}
+      >
+        <BottomNavigation showLabels value={tab} onChange={(_, v) => setTab(v as TabKey)}>
+          {TABS.map((t) => <BottomNavigationAction key={t.key} value={t.key} label={t.label} icon={t.icon} />)}
+        </BottomNavigation>
+      </Paper>
+
+      {me && (
+        <ParqForm
+          open={parqOpen}
+          memberId={memberId}
+          onClose={() => setParqOpen(false)}
+          onCleared={onParqCleared}
+          onReferral={(m) => setReferral(m)}
+        />
+      )}
+    </Chrome>
   );
 }

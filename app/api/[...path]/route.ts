@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { eq, desc, and, inArray } from 'drizzle-orm';
 import { db, schema } from '@/db';
 import { seed } from '@/db/seed';
-import { MUSCLES, SERVICES, ADDONS, service, addon, todayIso, uid, muscle } from '@/lib/reference';
+import { MUSCLES, SERVICES, ADDONS, PARQ_QUESTIONS, service, addon, todayIso, uid, muscle } from '@/lib/reference';
 import { computeScores, priorityAreas } from '@/lib/scoring';
 import { simulateDeviceRead, fromManualEntry } from '@/lib/adapters/bodymap';
 
@@ -73,7 +73,7 @@ async function snapshot() {
   return {
     members: ms, coaches: cs, bookings: bk, sessions: se, programs: pg,
     checkins: ck, scoreDays: sd, assessments: asRows, measurements: meas,
-    reference: { muscles: MUSCLES, services: SERVICES, addons: ADDONS },
+    reference: { muscles: MUSCLES, services: SERVICES, addons: ADDONS, parqQuestions: PARQ_QUESTIONS },
     serverTime: new Date().toISOString(),
   };
 }
@@ -167,6 +167,31 @@ async function handle(verb: string, seg: string[], q: URLSearchParams, body: any
     const initials = body.name.trim().split(/\s+/).map((x: string) => x[0]).join('').slice(0, 2).toUpperCase();
     await db.insert(coaches).values({ id, name: body.name.trim(), initials, title: body.title || 'Flexologist', siteId: 's1', isDemo: false } as any);
     return { coachId: id, created: true };
+  }
+
+  /* Self-service PAR-Q. Deliberate exception to the "a named person clears
+     it" rule — see PARQ_QUESTIONS in lib/reference.ts and docs/adr/0001.
+     Checked before the coach-clear route below since both match seg[2]==='parq'. */
+  if (verb === 'POST' && seg[0] === 'members' && seg[2] === 'parq' && seg[3] === 'submit') {
+    const answers: Record<string, boolean> = body.answers || {};
+    const redFlagged = PARQ_QUESTIONS.some((q) => q.redFlag && answers[q.key]);
+    if (redFlagged) {
+      const existing = await db.select().from(flags).where(eq(flags.memberId, seg[1]));
+      if (!existing.some((f) => /PAR-Q referral/i.test(f.text))) {
+        await db.insert(flags).values({
+          id: uid('fl'), memberId: seg[1],
+          text: 'PAR-Q referral — please see a physician before starting an activity programme.',
+          since: todayIso(),
+        } as any);
+      }
+      await db.update(members).set({ parqCleared: false, parqAt: todayIso() } as any).where(eq(members.id, seg[1]));
+      return { cleared: false, referral: true, message: 'Based on your answers, please check with a physician before your first session. We will not book you in until then.' };
+    }
+    await db.update(members).set({ parqCleared: true, parqAt: todayIso() } as any).where(eq(members.id, seg[1]));
+    const fs = await db.select().from(flags).where(eq(flags.memberId, seg[1]));
+    const parqFlags = fs.filter((f) => /PAR-Q/i.test(f.text)).map((f) => f.id);
+    if (parqFlags.length) await db.delete(flags).where(inArray(flags.id, parqFlags));
+    return { cleared: true };
   }
 
   if (verb === 'POST' && seg[0] === 'members' && seg[2] === 'parq') {
