@@ -33,29 +33,32 @@ Trademark clearance is outstanding and is the first item on the legal checklist.
 
 ### 1.1 The one-sentence version
 
-Marn is a recovery studio business whose actual product is a measurement dataset: assisted stretching
-and physical recovery delivered one-to-one in studios, where every session produces numbers a member
-can watch move over months.
+Marn is a companion app for physical rehab and pain relief: assisted stretching and physical recovery
+delivered one-to-one in studios, tracked in an app a member opens every day, so the relief they feel is
+backed by a number they can watch move over months.
 
 ### 1.2 Why the framing matters
 
 There is an obvious version of this business and a better one.
 
-The obvious version is a stretch studio with an app. Hire flexologists, fit out a unit in a mall,
-build a booking app, sell packages. It works, it is being done, and it has no defensible position:
-anyone with capital can buy the same beds and hire from the same pool. The app is a booking form.
-Competition is on location and price, and price competition in a service business with fixed labour
-costs ends badly.
+The obvious version is a stretch studio members visit when something hurts, with a booking app bolted
+on. Hire flexologists, fit out a unit in a mall, sell packages. It works, it is being done, and it has
+no defensible position: anyone with capital can buy the same beds and hire from the same pool. The app
+is a booking form. Competition is on location and price, and price competition in a service business
+with fixed labour costs ends badly.
 
-The better version inverts it. **The measurement is the product; the studio is the delivery
-mechanism.** Every member has a longitudinal record — ten joint angles in degrees, captured every six
-to eight sessions, tied to what was worked, what hurt before and after, how well they slept, and
-whether they did their homework. Nobody in this market has that dataset, and it compounds. It is the
-reason members stay past month three, the reason a corporate buyer signs, and the thing an acquirer
-is actually buying.
+The better version inverts it. **Pain relief and physical rehab are what a member is buying; the app is
+where they live with it, and the studio is where the physical work happens.** A member opens the app
+between visits, not just to book — to see what hurt before and after, whether it's actually easing, and
+what to do at home. Every member has a longitudinal record behind that experience — ten joint angles in
+degrees, captured every six to eight sessions, tied to what was worked and how they slept — and that
+record is what turns "I feel a bit better" into something a member can see and trust. Nobody in this
+market gives a member that. It is the reason members stay past month three, the reason a corporate buyer
+signs, and the thing an acquirer is actually buying.
 
-The practical consequence for engineering: **the assessment pipeline is the core system. Booking and
-payments are commodity plumbing to be built as thinly as possible and never lovingly.**
+The practical consequence for engineering: **the app a member returns to is the core system, and the
+assessment pipeline behind it is what makes its pain-relief claims trustworthy rather than anecdotal.
+Booking and payments are commodity plumbing to be built as thinly as possible and never lovingly.**
 
 ### 1.3 What we are building
 
@@ -64,8 +67,14 @@ Three surfaces on one backend.
 | Surface | Who | Where |
 |---|---|---|
 | Member app | Paying members | iOS, Android, mobile web |
-| Coach console | Flexologists, studio managers | Tablet at the bed, laptop at the desk |
+| Coach console | Flexologists | Tablet at the bed, laptop at the desk |
+| Studio manager console | Studio managers | Laptop at the desk, tablet on the floor |
 | Corporate portal | Employer accounts | Desktop web |
+
+> Coach console and studio manager console started as one surface for two
+> roles; the Phase 1 root build (starting 2026-08-11) splits them into two
+> consoles with different capabilities, not just a shared screen with a
+> role flag — see `docs/adr/0008-studio-manager-role.md`.
 
 Behind them: a Postgres database whose central table is one row per muscle group per assessment, a
 scoring engine, an integration layer for the BodyMap measurement device and consumer wearables, and
@@ -96,6 +105,13 @@ A clinic is regulated by the Dubai Health Authority, requires a licensed facilit
 physiotherapists rather than trained flexologists, and carries a different insurance and record-keeping
 regime. That is a viable business but a slower and more expensive one, and it is not what we are
 building first.
+
+**Pain relief and physical rehab are the headline benefit we market — that's the whole point of the
+product and it is not the thing this section restricts.** What's restricted is *how we describe
+delivering it*: no diagnosing the cause of pain, no treatment plans, no promise to cure. We describe
+measured change — "hip flexion up 9°, reported pain down from 6 to 3" — and let the member draw their
+own conclusion. Selling the outcome and staying out of clinical language are not in tension; the copy
+just has to do the first without doing the second.
 
 The consequence runs all the way into the codebase and is not merely a marketing preference:
 
@@ -128,7 +144,7 @@ the correct thing to do to someone who has walked in unwell.
 
 ### 2.1 Market
 
-The UAE, and Dubai in particular, is unusually well suited to a measurement-led recovery business:
+The UAE, and Dubai in particular, is unusually well suited to an app-led pain-relief and rehab business:
 
 - **A young, high-income, health-engaged expatriate population.** The overwhelming majority of Dubai's
   residents are expatriates, disproportionately professional and disproportionately willing to spend on
@@ -159,9 +175,10 @@ would be most dangerous.
 and the aggregate anonymised reporting is only possible because of the measurement layer. Phase four,
 but designed for from the schema up.
 
-### 2.3 Why measurement is the wedge
+### 2.3 Why tracked progress is the wedge
 
-Three things follow from the dataset that do not follow from a stretch session:
+Three things follow from a member being able to see their own relief measured, that do not follow from
+a stretch session alone:
 
 **Retention.** Service businesses churn because the customer cannot tell whether it worked. A member
 looking at a hamstring arc that has moved from 52° to 71° over four months does not churn the way
@@ -352,6 +369,14 @@ PAR-Q-derived questionnaire, completed with a coach at first visit. Cleared memb
 uncleared members cannot. Red-flag answers produce a referral message, not a workaround.
 
 ### 4.2 Coach console
+
+> As of the Phase 1 root build (2026-08-11), booking confirm/decline/reassign
+> (§4.2.1, §4.2.2) moved to the studio manager console, not the coach
+> console — a coach's schedule is read-only against already-approved
+> bookings, and a coach's member-record access excludes contact and payment
+> data. See `docs/adr/0008-studio-manager-role.md` for the full reasoning;
+> not rewriting §4.2.1/§4.2.2 below wholesale since they still describe the
+> feature correctly, just not on this console.
 
 #### 4.2.1 Floor schedule (P1)
 Today's bookings by time with member, service, resources, coach and status. Confirm, decline, reassign,
@@ -824,10 +849,14 @@ because that conflation is how privilege-escalation bugs are born.
 | Role | Access |
 |---|---|
 | Member | Own record only. Friends' shared scores where mutual consent exists |
-| Coach | Members at their site; assessment and session write; flag management |
-| Studio manager | Coach, plus roster, capacity, credits and pricing at their site |
+| Coach | Assigned members at their site — check-in and session context needed for the session; assessment and session write; flag management. **Not** contact or payment details, and **not** booking approval as of the Phase 1 root build |
+| Studio manager | All members at their site (coach access plus contact/payment); roster, shifts, capacity, credits and pricing; sole booking approval as of the Phase 1 root build |
 | Corporate admin | Aggregate reporting for their organisation. **Never** individual records |
 | Platform admin | Everything, with every action logged |
+
+> The bolded exceptions were added 2026-08-11 — see
+> `docs/adr/0008-studio-manager-role.md`. Booking approval is no longer
+> "coach, plus manager oversight"; it moved to the manager exclusively.
 
 Authorisation is enforced server-side on every route against the authenticated identity. Client-side
 role checks are presentation only and are assumed hostile.
@@ -1187,8 +1216,9 @@ hoped, that one engineer is one engineer, and that a studio has to open on a dat
 software is doing.
 
 The architecture is therefore chosen to be boring and portable, so that engineering effort goes into the
-two things that actually differentiate the business: a measurement dataset that can be trusted, and a
-coach console fast enough that coaches use it willingly.
+two things that actually differentiate the business: a companion app whose pain-relief and progress
+claims are backed by a measurement dataset that can be trusted, and a coach console fast enough that
+coaches use it willingly.
 
 Everything else in this document is negotiable. Those two are not.
 

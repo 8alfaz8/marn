@@ -1,6 +1,6 @@
 # CLAUDE.md — Marn engineering law
 
-Marn is a **measurement company delivered through studios**. One-to-one assisted stretching and multi-modality recovery (compression, oxygen, sound, hydration) are the delivery; the product is the measured change in a member's body over time, and the proof we can show them, their coach, and their employer. Every engineering decision serves that: if a feature doesn't produce, protect, or reveal a measurement, it is not the priority.
+Marn is a **companion app for physical rehab and pain relief**, delivered through one-to-one assisted stretching and multi-modality recovery (compression, oxygen, sound, hydration) in studios. The app is where a member lives day to day; the studio is where the physical work happens. Every session is measured, so the relief is provable — to the member, their coach, and their employer — not just felt. Every engineering decision serves the pain-relief outcome first; measurement exists to prove and sustain it, never to replace it as the point of the product.
 
 Small team, compressed timeline. Leverage comes from these standards, not headcount.
 
@@ -29,7 +29,7 @@ These bias toward caution over speed. For a typo or an obvious one-liner, use ju
 ## Iron rules (violating any is a blocking defect)
 
 - **Measurement provenance is mandatory.** Every measured value carries `source` (`bodymap` | `coach_manual` | `member_report`), `instrument`, `protocol_version`, `measured_at`, `measured_by`. A derived, estimated, or interpolated value never lands in the same column as a measured one. Charts must be able to say where each point came from.
-- **Wellness studio, not a clinic.** No diagnosis, no treatment claims, no clinical vocabulary in UI copy, notifications, reports, or generated text. We describe range, symmetry, and change over time — never pathology. Copy that reads as medical advice is a defect regardless of how accurate it is.
+- **Wellness studio, not a clinic.** No diagnosis, no treatment claims, no clinical vocabulary in UI copy, notifications, reports, or generated text. We describe range, symmetry, and change over time — never pathology. Copy that reads as medical advice is a defect regardless of how accurate it is. This is not in tension with selling on pain relief: pain relief is the marketed outcome, described as measured change ("reported pain down from 6 to 3"), never as a diagnosis, treatment plan, or cure.
 - **Health data is the highest-sensitivity class.** PAR-Q answers, injuries, flags, measurements, and member identifiers never appear in logs, traces, analytics events, error reports, or third-party payloads. Data residency and retention follow the regulatory chapter of the blueprint; when a new vendor touches member data, that's an ADR, not a config change.
 - **Safety flags route to a human.** A PAR-Q flag or coach-raised concern gates the affected activity until a named person clears it, with who and when recorded. No automatic expiry, no clearing on the member's own say-so.
 - **BodyMap stays behind the adapter.** One port, three adapters — device API, file export, manual entry. No BodyMap-shaped type, field name, or unit assumption escapes `«lib/integrations/bodymap»` into domain code. Domain code must compile and pass tests with the manual-entry adapter alone.
@@ -41,39 +41,56 @@ These bias toward caution over speed. For a typo or an obvious one-liner, use ju
 
 ## Repo map
 
-Reconciled against what's actually in the repo (2026-08-09). Route groups in
-the original plan (`app/(member)`, `app/(coach)`) don't work as written — a
-parenthesized segment adds no URL, so two of them both resolving to `page.tsx`
-collide at `/`. Plain directories give each surface its own URL instead.
+Reconciled against what's actually in the repo (2026-08-10). Two trees now
+(see `docs/adr/0005-prototype-product-split.md`):
+
+- **`prototype/`** — the disposable, no-real-auth build. Self-contained Next.js
+  app (own `package.json`, `node_modules`, `.env`) kept running as a reference
+  and demo, not extended with real-product work.
+- **Repo root** — the real customer product, starting from a bare Next.js +
+  MUI shell (no feature code yet). This is what every new feature request
+  builds into.
+- **`docs/`, `CLAUDE.md`, `AGENTS.md`** stay at root and govern both trees.
+
+Route groups in the original plan (`app/(member)`, `app/(coach)`) don't work
+as written — a parenthesized segment adds no URL, so two of them both
+resolving to `page.tsx` collide at `/`. Plain directories give each surface
+its own URL instead — true in `prototype/` and binding for the root build too.
 
 | Path | What |
 |---|---|
-| `app/page.tsx` | Gate — persona picker + signup (`components/Gate.tsx`) |
-| `app/member` | Member surface at `/member` — booking, progress, session history, PAR-Q |
-| `app/coach` | Coach console at `/coach` — day view, session capture, measurements, flags |
-| `app/admin` | Admin/CRM at `/admin` — studio outcomes, revenue, capacity, roster, member roster |
-| `app/(corporate)` | **Not built.** Corporate portal is blueprint Phase 4 — no employer accounts exist yet |
-| `app/api` | Single dispatcher route (`app/api/[...path]/route.ts`) + `app/api/session` for the identity cookie |
-| `lib/reference.ts` | Static reference data, scoring inputs, `scopeSnapshotForCoach`, `PARQ_QUESTIONS` |
-| `lib/session.ts` | Identity cookie helpers — **not real authorization**, see `docs/adr/0002` |
-| `lib/db` | **Not built as its own directory** — schema lives in `db/schema.ts`, queries inline in the API dispatcher |
-| `lib/measurement` | **Not built.** Provenance fields (`instrument`, `protocol_version`, `measured_by`) aren't in the schema yet — see `docs/adr/0002` |
-| `lib/integrations/bodymap` | **Not built under this path** — the adapter lives at `lib/adapters/bodymap.ts` |
-| `lib/auth` | **Not built.** No real session/role system — see `docs/adr/0002` |
-| `components/` | Chrome (shared AppBar), Gate, Member, Coach, Admin, ParqForm, Viz (brand SVG), Panels (debug tools, plain CSS by design) |
-| `theme/` | MUI theme + Marn tokens (`theme.ts` is visual truth) — palette reconciled against the prototype's actual brand hex values |
-| `drizzle/` | **Not present** — migrations run via `drizzle-kit push` (`db:push`), not checked-in migration files |
-| `docs/` | `docs/design/design-system.md`, `docs/adr/`. `docs/blueprint/`, `docs/architecture/overview.md`, `docs/design/journeys.md` don't exist yet — `marn-blueprint.md` at the repo root is the single-file source of truth for now |
+| `app/layout.tsx`, `app/page.tsx` | Root product shell — bare MUI `ThemeProvider`/`CssBaseline`, no feature pages yet |
+| `theme/theme.ts` | Root product theme — currently plain MUI defaults, `direction: 'ltr'`, RTL-ready. Pending the new brand design system (logo, fonts, palette) before this becomes visual truth |
+| `prototype/app/page.tsx` | Prototype gate — persona picker + signup (`prototype/components/Gate.tsx`) |
+| `prototype/app/member`, `/coach`, `/admin` | Prototype member/coach/admin surfaces — see `docs/architecture/overview.md` for what each does and its deviations from the blueprint |
+| `prototype/app/api` | Prototype's single dispatcher route + identity-cookie session endpoint |
+| `prototype/lib/session.ts` | Identity cookie helpers — **not real authorization**, see `docs/adr/0002` |
+| `prototype/lib/adapters/bodymap.ts` | BodyMap anti-corruption adapter — manual-entry path works, device/file-export paths are stubs |
+| `prototype/components/`, `prototype/theme/`, `prototype/db/` | Prototype UI, MUI theme + tokens, Drizzle schema/seed — unchanged from before the split, just relocated |
+| `lib/auth`, `lib/measurement`, `lib/integrations/bodymap`, `db/` (root) | **Not built yet at root.** Real auth, per-measurement provenance, and a BodyMap adapter are Phase-mapped work for the root product, not assumed reusable from the prototype's shortcuts — see `docs/adr/0002` and `docs/adr/0005` |
+| `docs/` | `docs/blueprint/marn-blueprint.md`, `docs/architecture/overview.md`, `docs/design/design-system.md`, `docs/design/journeys.md`, `docs/adr/` — all present, all governing the root build. Plus two living logs kept current alongside every change: `docs/decisions.md` (why — decision + reasoning + trade-off) and `docs/flow.md` (how — call chains between files/functions/modules) |
 
 ## Commands
 
-`npm run dev` · `npm run build` · `npm run db:push` / `npm run db:studio` / `npm run db:seed` (Drizzle). **No `npm run check` script exists** — there is no lint/test config in this repo yet; `npx tsc --noEmit` and `npm run build` are the only automated checks available today.
+Root product: `npm run dev` / `npm run build` from the repo root, once dependencies are installed there.
+
+Prototype: same commands from inside `prototype/` — plus `npm run db:push` / `npm run db:studio` / `npm run db:seed` (Drizzle, prototype only).
+
+**No `npm run check` script exists in either tree** — there is no lint/test config yet; `npx tsc --noEmit` and `npm run build` are the only automated checks available today.
 
 ## Workflow
 
 Plan first for anything non-trivial — a numbered plan with a verification step per line, in the response, before the first edit. Tests where they pay (measurement math, provenance, authorization, adapters — not every render). Small diffs. Conventional commits. An ADR in `docs/adr/` when a decision constrains the future (vendor, schema shape, boundary, pricing model). Update the module's section in `docs/architecture/overview.md` in the same change.
 
+Also in the same change:
+- **`docs/decisions.md`** — append an entry for every meaningful decision made while writing the code: library chosen over an alternative, pattern chosen over an alternative, a trade-off accepted. One entry per decision, newest at the top. If the decision also constrains the future, it gets a full ADR too — link it from the entry instead of duplicating the writeup.
+- **`docs/flow.md`** — add or update the entry for the execution path touched: what calls what, across which files/functions/modules, in what order, and which part of that path the current change modifies. Update the existing entry in place if the change touches a path already traced; don't duplicate it.
+
 When a task is done, pull the next unchecked item in the current phase and start it.
+
+## Confirm before major changes
+
+Before starting a major change — a new dependency, a schema/migration, a new architectural pattern, anything touching auth/security or the measurement/provenance model, or a change spanning multiple modules — stop and quiz the user on it through the structured question tool: what you're about to do, the alternatives considered, and a recommendation. Proceed only once they accept. This is stricter than "ask only at genuine forks" above, deliberately, for this category of change specifically — it does not apply to small changes (a typo, a one-line fix, a single-file bug fix), which still follow "decide, then build."
 
 ## Definition of Done
 

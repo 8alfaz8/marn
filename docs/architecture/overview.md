@@ -9,7 +9,17 @@ update its row in the same change.
 scope for that module is implemented; it does not mean "matches the full
 blueprint spec").
 
-| Module | What it does | Code path | Status |
+**Repo split (2026-08-10, see `docs/adr/0005-prototype-product-split.md`):** the
+disposable, no-real-auth build described by this table was relocated to
+`prototype/` — every code path below is relative to `prototype/`, e.g.
+"`components/Member.tsx`" is `prototype/components/Member.tsx`. The repo root
+is now reserved for the real customer product and currently holds only a bare
+Next.js + MUI shell (`app/layout.tsx`, `app/page.tsx`, `theme/theme.ts`) with
+no feature code — every row below is **not started** from the root product's
+point of view until it's rebuilt there against real auth and a real schema.
+`docs/`, `CLAUDE.md`, and `AGENTS.md` stay at root and govern both trees.
+
+| Module | What it does | Code path (under `prototype/`) | Status |
 |---|---|---|---|
 | Member app | Scores/progress, body map, booking, home programme, session history, PAR-Q | `components/Member.tsx`, `components/ParqForm.tsx`, `app/member/page.tsx` | **in progress** — see deviations |
 | Coach console | Floor schedule, request inbox, assessment capture, session logging, flags, programme prescription | `components/Coach.tsx`, `app/coach/page.tsx` | **in progress** — see deviations |
@@ -21,8 +31,23 @@ blueprint spec").
 | Credits & payments | Session credit tracking, package purchase, payment processing | `members.credits` (plain integer column) | **not started** for anything the blueprint actually asks for — see deviations |
 | Notifications | Push + WhatsApp booking/session confirmations | — | **not started** — API responses claim `notified: ['push','whatsapp']` but nothing is sent; see deviations |
 | Identity / session | Who's using the app right now | `lib/session.ts`, `app/api/session/route.ts` | **prototype only** — a plain identity cookie, not authentication. See `docs/adr/0002-prototype-auth-gap.md` |
-| Design system | MUI v9 theme, tokens | `theme/theme.ts`, `docs/design/design-system.md` | **done** — every surface in the app renders through it |
+| Design system | MUI theme, tokens | `theme/theme.ts` (root: real brand tokens; `prototype/theme/theme.ts`: prototype's unrelated bone/ink palette), `docs/design/design-system.md` | **root: token layer done** (palette light/dark, Petrona/Figtree typography, shape/radius, focus ring, tabular numerals — sourced from `Marn wellness brand design system/`), **no screens built against it yet**; ambient wash and elevation shadows documented but not encoded (no consuming component). Prototype unchanged. |
 | Hosting / data residency | UAE-region production hosting | — | **not started** — prototype runs on Vercel + Neon, which the blueprint explicitly allows only because it holds no real member data (§8.2) |
+
+## Root product status (real build, not the prototype)
+
+Started 2026-08-11: the first vertical slice at the repo root, staff-side
+only (coach console + a new studio manager console — `docs/adr/0008-studio-manager-role.md`),
+no member-facing UI yet. Code paths below are relative to the repo root, not
+`prototype/`.
+
+| Module | Code path | Status |
+|---|---|---|
+| Schema | `db/schema.ts`, `drizzle.config.ts`, `drizzle/0000_thankful_invaders.sql` | **done** for this slice's tables (see `docs/adr/0007-root-schema-shape.md`) — migration generated, **not pushed**, no `DATABASE_URL` provisioned yet |
+| Staff auth | not built yet | **not started** — plan is `better-auth` email+password for staff, phone-OTP deferred to Phase 2 member auth (`docs/adr/0009-staff-auth-simple-credential-first.md`) |
+| Authorization layer | not built yet | **not started** — server-side role/scope enforcement (coach vs. studio manager, per-capability per `docs/adr/0008`) is the next dependency after auth lands |
+| Coach console | not built yet | **not started** — floor schedule (read-only), assigned-member roster (check-ins, past sessions, assessment capture, session logging, flags), no contact/payment fields |
+| Studio manager console | not built yet | **not started** — shift assignment, booking approval, staff/member CRM, lightweight earnings/capacity view, floor activity |
 
 ## Deviations from the blueprint, by module
 
