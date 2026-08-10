@@ -3,165 +3,116 @@
 import { createTheme } from '@mui/material/styles';
 
 /**
- * Marn theme — bone and ink.
+ * Marn brand theme.
  *
- * This file is visual truth. Every colour, font, radius, and spacing step used
- * anywhere in the app resolves here. Hardcoding a value in a component is a defect.
+ * Tokens sourced from `Marn wellness brand design system/design_handoff_marn_app/README.md`
+ * (high-fidelity, colours/type/space/radius final; logo mark still pending).
+ * Dark is the app's default scheme; light is kept for web/email/print per the
+ * handoff, with the few tokens it doesn't specify (surfaceRaised, lineStrong,
+ * textMuted, primaryHover) derived rather than invented from scratch.
  *
- * Palette reconciled against the prototype's real tokens (former app/globals.css
- * :root block): bone #E7E4DB, ink #10130E, lime #A9E34B (the actual accent —
- * design-system.md's guessed clay accent didn't match the built prototype), plus
- * status colours amber/clay/jade for limited/restricted/excellent bands.
- *
- * The prototype renders data panels as dark-ink cards on the bone page (an
- * inverted-surface pattern), which stock MUI Paper (white) doesn't replicate.
- * background.paper stays MUI-default white for now; a dark Paper variant for
- * data panels is a follow-up, not done in this pass (see docs/adr/).
- *
- * Font families come from next/font CSS variables declared in app/layout.tsx:
- *   --font-bricolage  (display)
- *   --font-instrument (UI + body)
- *   --font-mono       (measured values)
+ * `direction: 'ltr'` today; Arabic RTL is a configuration flip per CLAUDE.md,
+ * so components must use logical properties (marginInlineStart, not ml) from
+ * the start rather than retrofitting later.
  */
 
-const display = 'var(--font-bricolage), Georgia, serif';
-const ui = 'var(--font-instrument), system-ui, -apple-system, sans-serif';
-const mono = 'var(--font-mono), ui-monospace, SFMono-Regular, monospace';
-
-// Tabular, non-jittering figures for anything measured.
-const numeric = {
-  fontFamily: mono,
-  fontFeatureSettings: '"tnum" 1, "zero" 1',
-  fontVariantNumeric: 'tabular-nums',
-} as const;
-
-// A `readout` variant for measured values. See module augmentation at the bottom.
 declare module '@mui/material/styles' {
-  interface TypographyVariants {
-    readout: React.CSSProperties;
+  interface Palette {
+    surfaceRaised: string;
+    lineStrong: string;
+    band: { restricted: string; limited: string; optimal: string; excellent: string };
   }
-  interface TypographyVariantsOptions {
-    readout?: React.CSSProperties;
+  interface PaletteOptions {
+    surfaceRaised?: string;
+    lineStrong?: string;
+    band?: { restricted: string; limited: string; optimal: string; excellent: string };
+  }
+  interface TypeText {
+    muted: string;
   }
 }
-declare module '@mui/material/Typography' {
-  interface TypographyPropsVariantOverrides {
-    readout: true;
-  }
-}
+
+const petrona = 'var(--font-petrona), serif';
+const figtree = 'var(--font-figtree), sans-serif';
+
+// Radius scale from the handoff. `shape.borderRadius` (MUI's own typed slot,
+// used by Paper/Card/Dialog by default) carries `md`; the rest are plain
+// constants — MUI's `Shape` type isn't augmentable from a public import path.
+export const radii = { sm: 12, md: 18, lg: 24, pill: 999 };
 
 const theme = createTheme({
-  // CSS theme variables: lets us add a dark scheme later without touching components.
-  cssVariables: true,
-
-  // direction: 'rtl' when the Arabic locale ships. Components must already use
-  // logical properties (marginInlineStart, not ml) so this is the only change here.
+  cssVariables: { colorSchemeSelector: 'data' },
+  defaultColorScheme: 'dark',
   direction: 'ltr',
-
-  spacing: 8,
-
-  shape: {
-    borderRadius: 8,
-  },
-
-  palette: {
-    mode: 'light',
-    primary: {
-      main: '#10130E', // ink
-      light: '#171B14', // ink-2
-      dark: '#000000',
-      contrastText: '#E7E4DB', // bone
-    },
-    secondary: {
-      main: '#A9E34B', // lime — the actual brand accent
-      light: '#BCEE68',
-      dark: '#5C8528', // lime-deep
-      contrastText: '#10130E', // ink text on lime, per the prototype's .btn class
-    },
-    background: {
-      default: '#E7E4DB', // bone
-      paper: '#FFFFFF',
-    },
-    text: {
-      primary: 'rgba(16, 19, 14, 0.92)',
-      secondary: 'rgba(16, 19, 14, 0.60)',
-      disabled: 'rgba(16, 19, 14, 0.38)',
-    },
-    divider: 'rgba(16, 19, 14, 0.14)',
-    // Reserved: warning means an open safety flag and nothing else.
-    warning: { main: '#E0A33C' }, // amber — "limited" band
-    success: { main: '#43B07C' }, // jade — "excellent" band
-    error: { main: '#D2532A' }, // clay — "restricted" band
-  },
-
-  typography: {
-    htmlFontSize: 16,
-    fontSize: 14,
-    fontFamily: ui,
-    h1: { fontFamily: display, fontWeight: 600, letterSpacing: '-0.02em' },
-    h2: { fontFamily: display, fontWeight: 600, letterSpacing: '-0.02em' },
-    h3: { fontFamily: display, fontWeight: 600, letterSpacing: '-0.01em' },
-    h4: { fontFamily: display, fontWeight: 600 },
-    h5: { fontFamily: ui, fontWeight: 600 },
-    h6: { fontFamily: ui, fontWeight: 600 },
-    subtitle1: { fontFamily: ui },
-    subtitle2: { fontFamily: ui, fontWeight: 600 },
-    body1: { fontFamily: ui, lineHeight: 1.6 },
-    body2: { fontFamily: ui, lineHeight: 1.55 },
-    button: { fontFamily: ui, fontWeight: 600, textTransform: 'none' },
-    caption: { fontFamily: ui },
-    overline: { ...numeric, letterSpacing: '0.08em', textTransform: 'uppercase' },
-    // Every measured value renders in this.
-    readout: { ...numeric, fontSize: '2rem', fontWeight: 500, lineHeight: 1.1 },
-  },
-
-  components: {
-    // Cards stay flat (no shadow, per the design system's "printed language"
-    // rule below) — but a flat card on a flat single-colour page reads as
-    // boxy with nothing behind it. This restores the subtle printed-grid +
-    // radial accent glow the pre-MUI prototype had on <body>, lost when
-    // CssBaseline replaced it with a plain background-color. Depth lives in
-    // the canvas, never on the card itself.
-    MuiCssBaseline: {
-      styleOverrides: {
-        body: {
-          backgroundImage: [
-            'repeating-linear-gradient(to right, rgba(16,19,14,.05) 0 1px, transparent 1px 64px)',
-            'repeating-linear-gradient(to bottom, rgba(16,19,14,.05) 0 1px, transparent 1px 64px)',
-            'radial-gradient(900px 500px at 88% -8%, rgba(169,227,75,.14), transparent 62%)',
-          ].join(','),
-          backgroundAttachment: 'fixed',
-        },
+  shape: { borderRadius: radii.md },
+  colorSchemes: {
+    dark: {
+      palette: {
+        background: { default: '#0C1210', paper: '#141C19' },
+        surfaceRaised: '#1D2724',
+        divider: '#2A3733',
+        lineStrong: '#3A4A44',
+        text: { primary: '#F0EFE9', secondary: '#A6B0AB', muted: '#7A8781' },
+        primary: { main: '#C8A46A', light: '#DDBB86', contrastText: '#0C1210' },
+        secondary: { main: '#8FCBB8' },
+        band: { restricted: '#8B9691', limited: '#A97C42', optimal: '#6FA98D', excellent: '#8FCBB8' },
       },
+    },
+    light: {
+      palette: {
+        background: { default: '#EFECE2', paper: '#F9F7F0' },
+        // Not specified by the handoff (dark is the fully-specified scheme) —
+        // reused from the nearest given token rather than invented.
+        surfaceRaised: '#F9F7F0',
+        divider: '#DED9C9',
+        lineStrong: '#DED9C9',
+        text: { primary: '#101614', secondary: '#5A635E', muted: '#5A635E' },
+        primary: { main: '#6E5220', contrastText: '#F9F7F0' },
+        secondary: { main: '#1F6152' },
+        band: { restricted: '#5C6663', limited: '#6B4C1C', optimal: '#245A46', excellent: '#1F6152' },
+      },
+    },
+  },
+  typography: {
+    fontFamily: figtree,
+    h1: { fontFamily: petrona, fontWeight: 400, fontSize: '4rem', lineHeight: 66 / 64, letterSpacing: '-0.02em', '@media (max-width:600px)': { fontSize: '2.5rem', lineHeight: 44 / 40 } },
+    h2: { fontFamily: petrona, fontWeight: 400, fontSize: '2.75rem', lineHeight: 50 / 44, letterSpacing: '-0.015em', '@media (max-width:600px)': { fontSize: '2rem', lineHeight: 38 / 32 } },
+    h3: { fontFamily: petrona, fontWeight: 400, fontSize: '1.875rem', lineHeight: 38 / 30, letterSpacing: '0em', '@media (max-width:600px)': { fontSize: '1.625rem', lineHeight: 32 / 26 } },
+    h4: { fontFamily: figtree, fontWeight: 600, fontSize: '1.375rem', lineHeight: 28 / 22, letterSpacing: '-0.01em' },
+    h5: { fontFamily: figtree, fontWeight: 600, fontSize: '1.125rem', lineHeight: 24 / 18 },
+    h6: { fontFamily: figtree, fontWeight: 600, fontSize: '1rem', lineHeight: 22 / 16 },
+    body1: { fontFamily: figtree, fontWeight: 400, fontSize: '1rem', lineHeight: 26 / 16 },
+    body2: { fontFamily: figtree, fontWeight: 400, fontSize: '0.875rem', lineHeight: 22 / 14 },
+    overline: { fontFamily: figtree, fontWeight: 600, fontSize: '0.6875rem', lineHeight: 14 / 11, letterSpacing: '0.16em' },
+    button: { fontFamily: figtree, fontWeight: 600, fontSize: '0.9375rem', textTransform: 'none' },
+  },
+  components: {
+    MuiCssBaseline: {
+      styleOverrides: (theme) => ({
+        // "Numerals — Figtree 600 with font-variant-numeric: tabular-nums set
+        // globally" — the brand has no monospace face; tabular figures alone
+        // keep a changing measured value from jittering or misaligning.
+        html: { fontVariantNumeric: 'tabular-nums' },
+        '*:focus-visible': {
+          outline: `2px solid ${theme.vars.palette.primary.main}`,
+          outlineOffset: '2px',
+        },
+      }),
     },
     MuiButton: {
-      defaultProps: { disableElevation: true },
       styleOverrides: {
-        root: { paddingInline: 20, paddingBlock: 10 },
-      },
-    },
-    MuiTextField: {
-      defaultProps: { variant: 'outlined', fullWidth: true },
-    },
-    MuiPaper: {
-      // Flat, printed language — outlined over elevation.
-      defaultProps: { variant: 'outlined' },
-      styleOverrides: { root: { backgroundImage: 'none' } },
-    },
-    MuiCard: {
-      defaultProps: { variant: 'outlined' },
-    },
-    MuiTableCell: {
-      styleOverrides: {
-        root: { '&.MuiTableCell-alignRight': numeric },
+        root: ({ theme, ownerState }) => ({
+          borderRadius: radii.pill,
+          ...(ownerState.variant === 'contained' &&
+            ownerState.color === 'primary' && {
+              '&:hover': { backgroundColor: theme.vars.palette.primary.light },
+            }),
+        }),
       },
     },
     MuiChip: {
-      styleOverrides: { root: { fontWeight: 600 } },
-    },
-    MuiTypography: {
-      defaultProps: {
-        variantMapping: { readout: 'span' },
+      styleOverrides: {
+        root: { borderRadius: radii.sm },
       },
     },
   },

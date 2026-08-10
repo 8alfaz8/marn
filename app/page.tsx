@@ -1,11 +1,13 @@
-import { redirect } from 'next/navigation';
-import { getIdentity } from '@/lib/session';
-import Gate from '@/components/Gate';
+import Box from '@mui/material/Box';
+import Typography from '@mui/material/Typography';
 
-export default async function GatePage() {
-  const who = await getIdentity();
-  if (who?.kind === 'member') redirect('/member');
-  if (who?.kind === 'coach') redirect('/coach');
-  if (who?.kind === 'admin') redirect('/admin');
-  return <Gate />;
+export default function Home() {
+  return (
+    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', p: 4, textAlign: 'center' }}>
+      <Typography variant="h4" component="h1" gutterBottom>Marn</Typography>
+      <Typography variant="body1" color="text.secondary">
+        The real product build starts here. See docs/architecture/overview.md for what&apos;s mapped and not yet built.
+      </Typography>
+    </Box>
+  );
 }

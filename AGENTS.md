@@ -2,7 +2,7 @@
 
 Canonical instructions live in **CLAUDE.md** (same directory) — read it first. It binds the blueprint (`docs/blueprint/`), the architecture map (`docs/architecture/overview.md`), and the design system (`docs/design/design-system.md`). Non-negotiables for any coding agent working on Marn:
 
-1. **Marn is a measurement company delivered through studios.** Work that doesn't produce, protect, or reveal a member's measured change is not the priority.
+1. **Marn is a companion app for physical rehab and pain relief, delivered through studios.** The app is where a member lives day to day; the studio is where the physical work happens. Measurement exists to prove and sustain the pain-relief outcome, not to replace it as the point of the product.
 2. **Think before coding; simplicity first; surgical changes; goal-driven execution.** Full scope of the mapped capability, minimal implementation. Every changed line traces to the request.
 3. **Measurement provenance is mandatory** (`source`, `instrument`, `protocol_version`, `measured_at`, `measured_by`). Derived values never occupy a measured column.
 4. **Wellness studio, not a clinic.** No diagnosis or treatment language anywhere in copy or generated text. Safety flags gate activity until a named human clears them.

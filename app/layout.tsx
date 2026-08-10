@@ -1,34 +1,41 @@
 import './globals.css';
 import type { Metadata, Viewport } from 'next';
+import { Petrona, Figtree } from 'next/font/google';
 import { AppRouterCacheProvider } from '@mui/material-nextjs/v15-appRouter';
 import { ThemeProvider } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
-import { Bricolage_Grotesque, Instrument_Sans, JetBrains_Mono } from 'next/font/google';
+import InitColorSchemeScript from '@mui/material/InitColorSchemeScript';
 import theme from '@/theme/theme';
 
-const bricolage = Bricolage_Grotesque({ subsets: ['latin'], display: 'swap', variable: '--font-bricolage' });
-const instrument = Instrument_Sans({ subsets: ['latin'], display: 'swap', variable: '--font-instrument' });
-const mono = JetBrains_Mono({ subsets: ['latin'], display: 'swap', variable: '--font-mono' });
+const petrona = Petrona({
+  subsets: ['latin'],
+  weight: ['300', '400', '500'],
+  style: ['normal', 'italic'],
+  variable: '--font-petrona',
+  display: 'swap',
+});
+const figtree = Figtree({
+  subsets: ['latin'],
+  weight: ['400', '500', '600', '700'],
+  variable: '--font-figtree',
+  display: 'swap',
+});
 
 export const metadata: Metadata = {
-  title: 'Marn — Recovery, measured',
-  description: 'Assisted stretching and recovery, tracked in degrees. Member app and coach console.',
+  title: 'Marn',
+  description: 'Recovery, measured.',
 };
 export const viewport: Viewport = {
-  width: 'device-width', initialScale: 1, themeColor: '#10130E', viewportFit: 'cover',
-  // The app is light-only (no dark palette built yet — theme.ts palette.mode
-  // is fixed 'light'). Without this, phones with system dark mode on apply
-  // their browser's forced/auto-dark heuristic to the page, which shifts the
-  // hardcoded status colours (restricted/limited/optimal/excellent) on the
-  // body map away from their real hex values. Desktop browsers rarely force
-  // this, which is why it only showed up on mobile.
-  colorScheme: 'light',
+  width: 'device-width', initialScale: 1, viewportFit: 'cover',
+  // Dark-first brand — let mobile browsers render both schemes natively.
+  colorScheme: 'dark light',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" dir="ltr" className={`${bricolage.variable} ${instrument.variable} ${mono.variable}`}>
+    <html lang="en" dir="ltr" className={`${petrona.variable} ${figtree.variable}`}>
       <body>
+        <InitColorSchemeScript attribute="data-mui-color-scheme" defaultMode="dark" />
         <AppRouterCacheProvider options={{ enableCssLayer: true }}>
           <ThemeProvider theme={theme}>
             <CssBaseline />
