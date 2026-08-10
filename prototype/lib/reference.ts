@@ -1,4 +1,5 @@
 /* Reference data. Static for now; becomes admin-editable tables later. */
+import { bands } from '@/theme/theme';
 
 export type Muscle = {
   key: string; label: string; region: 'Lower' | 'Core' | 'Upper';
@@ -66,14 +67,32 @@ export const PERSONAS = [
   { id: 'new',    label: 'Brand new',   blurb: 'Signed up, never assessed. This is the empty state.' },
 ];
 
-/* Status bands for a ROM measurement as a fraction of target. */
+/* Status bands for a ROM measurement as a fraction of target. Legacy
+   thresholds (fraction-of-target degrees) — distinct from `bandOf()` below,
+   which implements the brand handoff's own thresholds on a 0-100 normalised
+   range score. Kept as-is rather than reconciled: changing these thresholds
+   would silently re-bucket every existing body-map/session-history colour,
+   which is a behaviour change outside this pass's scope. Colours themselves
+   now come from the brand's `bands` tokens (theme.ts) instead of the old
+   lime/amber/clay/jade literals. */
 export function statusOf(p: number) {
   return p < 0.6 ? 'restricted' : p < 0.75 ? 'limited' : p < 0.9 ? 'optimal' : 'excellent';
 }
-export const STATUS_COLOR: Record<string, string> = {
-  restricted: '#D2532A', limited: '#E0A33C', optimal: '#A9E34B', excellent: '#43B07C',
-};
+export const STATUS_COLOR: Record<string, string> = bands;
 export const colorOf = (p: number) => STATUS_COLOR[statusOf(p)];
+
+export type Band = 'restricted' | 'limited' | 'optimal' | 'excellent';
+
+/** Brand handoff's band assignment: "< 35 Restricted, < 60 Limited, < 80
+ * Optimal, >= 80 Excellent" on a joint's normalised 0-100 range score. Used
+ * by the new member-app screens (Session detail, Mobility detail, Session
+ * report, Progress) — kept separate from the legacy `statusOf()` above,
+ * which uses different thresholds on a different scale. */
+export function bandOf(score: number): Band {
+  return score < 35 ? 'restricted' : score < 60 ? 'limited' : score < 80 ? 'optimal' : 'excellent';
+}
+export const bandColor = (score: number) => bands[bandOf(score)];
+export const bandLabel = (b: Band) => b.charAt(0).toUpperCase() + b.slice(1);
 
 /* Scopes a full snapshot down to what one coach should see: their own
    bookings plus the unassigned request inbox, and the members tied to those.

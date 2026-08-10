@@ -26,6 +26,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import ToggleButton from '@mui/material/ToggleButton';
 import { BarChart } from '@mui/x-charts/BarChart';
+import { useTheme } from '@mui/material/styles';
 import Chrome from './Chrome';
 import { Gonio } from './Viz';
 import { api, useSnapshot } from '@/lib/store';
@@ -59,6 +60,7 @@ const cutoffFor = (key: RangeKey) => {
    coach shouldn't see the business side of the studio; nothing about the
    data access here is new, only who it's shown to. */
 export default function Admin() {
+  const theme = useTheme();
   const { data: snap, refresh } = useSnapshot();
   const [msg, setMsg] = useState<string | null>(null);
   const toast = (s: string) => { setMsg(s); setTimeout(() => setMsg(null), 2800); };
@@ -222,7 +224,7 @@ export default function Admin() {
                   height={240}
                   margin={{ top: 16, bottom: 24, left: 8, right: 8 }}
                   xAxis={[{ data: days, scaleType: 'band', valueFormatter: (v: string) => v.slice(5) }]}
-                  series={[{ data: days.map((d) => byDay.get(d) || 0), label: 'AED', color: '#A9E34B' }]}
+                  series={[{ data: days.map((d) => byDay.get(d) || 0), label: 'AED', color: theme.palette.primary.main }]}
                   hideLegend
                 />
               ) : (
@@ -292,7 +294,7 @@ export default function Admin() {
   );
 
   const renderMembers = () => {
-    const cell = (v: number) => <TableCell align="right"><Typography variant="body2" sx={{ fontFamily: 'var(--font-mono)', color: v ? colorOf(v / 100) : 'text.disabled' }}>{v || '—'}</Typography></TableCell>;
+    const cell = (v: number) => <TableCell align="right"><Typography variant="body2" sx={{ fontWeight: 600, color: v ? colorOf(v / 100) : 'text.disabled' }}>{v || '—'}</Typography></TableCell>;
     return (
       <Container maxWidth="lg" sx={{ py: 3 }}>
         <Stack direction="row" sx={{ mb: 2, justifyContent: 'space-between', alignItems: 'flex-end' }}>
@@ -348,11 +350,13 @@ export default function Admin() {
           <IconButton onClick={() => setOpen(null)}><CloseIcon /></IconButton>
         </Stack>
 
+        {/* Safety flag, not an app error — warning (ochre) matches the brand's
+            no-red rule and CLAUDE.md's "route to a human" framing over an alarm. */}
         {m.flags.map((f: any) => (
-          <Paper key={f.id} variant="outlined" sx={{ p: 1.5, mt: 1.5, borderColor: 'error.main', display: 'flex', gap: 1, alignItems: 'center' }}>
-            <Chip size="small" color="error" label="Flag" />
+          <Paper key={f.id} variant="outlined" sx={{ p: 1.5, mt: 1.5, borderColor: 'warning.main', display: 'flex', gap: 1, alignItems: 'center' }}>
+            <Chip size="small" color="warning" label="Flag" />
             <Typography variant="body2" sx={{ flex: 1 }}>{f.text}</Typography>
-            <Button size="small" color="error" onClick={() => act(api('DELETE', `/members/${m.id}/flags/${f.id}`, undefined, 'ADMIN'), 'Flag cleared')}>Clear</Button>
+            <Button size="small" color="warning" onClick={() => act(api('DELETE', `/members/${m.id}/flags/${f.id}`, undefined, 'ADMIN'), 'Flag cleared')}>Clear</Button>
           </Paper>
         ))}
         {!m.parqCleared && (

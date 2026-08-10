@@ -477,7 +477,7 @@ export default function Coach({ coachId }: { coachId: string }) {
             {panel(a ? `Latest assessment · ${a.capturedAt} · ${a.source}` : 'No assessment on record', (
               <>
                 {meas.length > 0 && (
-                  <Box sx={{ bgcolor: 'primary.main', borderRadius: 1, p: 2, mb: 3 }}>
+                  <Box sx={{ bgcolor: 'action.hover', borderRadius: 1, p: 2, mb: 3 }}>
                     <Grid container spacing={2}>
                       {([
                         ['FLEXIBILITY', m.scores.flexibility],
@@ -509,7 +509,9 @@ export default function Coach({ coachId }: { coachId: string }) {
                             <Box component="span">
                               target {mu.target}°
                               {dl !== null && (
-                                <Box component="span" sx={{ color: dl >= 0 ? 'success.main' : 'error.main', marginInlineStart: 1 }}>
+                                /* No red for a measured decrease — brass, matching the brand's
+                                   "positive change in Optimal green, negative in brass" rule. */
+                                <Box component="span" sx={{ color: dl >= 0 ? 'success.main' : 'primary.main', marginInlineStart: 1 }}>
                                   {dl >= 0 ? '+' : ''}{dl}
                                 </Box>
                               )}

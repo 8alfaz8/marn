@@ -59,12 +59,27 @@ export default function Chrome({ current, label, snap, refresh, msg, children }:
 
   return (
     <>
-      <AppBar position="sticky" color="primary" elevation={0} sx={{ borderBottom: '1px solid', borderColor: 'divider' }}>
+      <AppBar position="sticky" elevation={0} sx={{ bgcolor: 'background.paper', color: 'text.primary', borderBottom: '1px solid', borderColor: 'divider' }}>
         <Toolbar sx={{ gap: 2 }}>
-          <Typography variant="h6" component="div" sx={{ fontFamily: 'var(--font-bricolage)' }}>
-            MAR<Box component="i" sx={{ color: 'secondary.main', fontStyle: 'normal' }}>N</Box>
+          {/* Reserved square slot for the final logo mark — the brand handoff's
+              mark (one of four candidates, Hinge/Arcade/Aperture/Orbit) isn't
+              final, so this stays a swappable placeholder rather than a
+              hardcoded SVG path. Swap the child for an <img>/<svg> when the
+              client delivers the asset. */}
+          <Box
+            aria-hidden
+            sx={{
+              width: 28, height: 28, borderRadius: (t) => t.marn.radius.sm, flexShrink: 0,
+              bgcolor: 'background.raised', border: '1px solid', borderColor: 'divider',
+              display: 'grid', placeItems: 'center',
+            }}
+          >
+            <Typography variant="overline" sx={{ color: 'primary.main', fontSize: '0.625rem' }}>M</Typography>
+          </Box>
+          <Typography variant="h6" component="div" sx={{ fontFamily: 'var(--font-petrona)' }}>
+            Marn
           </Typography>
-          <Typography variant="overline" sx={{ color: 'primary.contrastText', opacity: 0.7 }}>{label}</Typography>
+          <Typography variant="overline" sx={{ color: 'text.secondary' }}>{label}</Typography>
           <Box sx={{ flex: 1 }} />
           <ToggleButtonGroup size="small" exclusive value={current} onChange={(_, v) => v && switchTo(v)}>
             <ToggleButton value="member">Member</ToggleButton>

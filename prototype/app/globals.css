@@ -1,0 +1,82 @@
+/* MARN design tokens.
+   Dark-first brand system: background/surface/surfaceRaised, brass primary,
+   celadon secondary, four no-red status bands. Signature: the opening-arc
+   motif (goniometer-style sweep).
+
+   Most of the app now renders through MUI (theme/theme.ts is visual truth
+   there — see CLAUDE.md). What's left here is: the CSS custom properties the
+   debug tool (components/Panels.tsx) reads directly, and a base reset.
+   Panels.tsx stays plain CSS on purpose — it's a debug tool, not a
+   member/coach/admin-facing surface, so it isn't part of the MUI migration.
+   Values here must match theme.ts's `marnColor`/`bands` exports — CSS custom
+   properties can't import TypeScript, so this is a hand-kept mirror, not a
+   second source of truth.
+
+   IMPORTANT: any selector here that targets a bare HTML tag MUI also renders
+   (table, th, td, button, input) must stay scoped under .dock. MUI's styles
+   are injected inside a CSS @layer (AppRouterCacheProvider's enableCssLayer);
+   an unlayered rule always wins the cascade over a layered one regardless of
+   specificity, so a bare `table{...}` here would silently override every
+   MUI <Table/> in the app. */
+
+:root{
+  /* This app is dark-first by brand design (theme.ts palette.mode is fixed
+     'dark'). Without this, phones in system light mode could apply a
+     forced/auto-light heuristic that shifts brand hues off their real values. */
+  color-scheme: dark;
+  --background:#0C1210; --surface:#141C19; --surface-raised:#1D2724;
+  --line:#2A3733; --line-strong:#3A4A44;
+  --primary:#C8A46A; --primary-hover:#DDBB86; --secondary:#8FCBB8;
+  --status-restricted:#8B9691; --status-limited:#A97C42; --status-optimal:#6FA98D; --status-excellent:#8FCBB8;
+  --error:#B9573E;
+  --text-primary:#F0EFE9; --text-secondary:#A6B0AB; --text-muted:#7A8781;
+  --dsp:var(--font-petrona),Georgia,serif;
+  --body:var(--font-figtree),system-ui,-apple-system,sans-serif;
+  --r:12px;
+}
+*{box-sizing:border-box}
+/* MUI's own outlined-input CSS relies on box-sizing:content-box (padding
+   16.5px 14px + height:1.4375em = the standard 56px control height); this is
+   unlayered so it would otherwise always beat that layered MUI rule regardless
+   of specificity (see the note above on cascade layers), collapsing every
+   TextField to ~33px and knocking its label off-centre. */
+input,textarea,select{box-sizing:content-box}
+html,body{height:100%}
+:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+
+.eyebrow{font-family:var(--body);font-weight:600;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--text-muted)}
+.eyebrow.on-ink{color:var(--text-secondary)}
+.kv{font-family:var(--body);font-size:11px;letter-spacing:.06em;color:var(--text-secondary)}
+.ghost{font-family:var(--body);font-weight:600;font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--text-secondary);
+  padding:6px 10px;border:1px solid var(--line);border-radius:var(--r);background:none;cursor:pointer}
+.ghost:hover{color:var(--primary);border-color:rgba(200,164,106,.5)}
+
+/* debug tools (components/Panels.tsx) */
+.dock{position:fixed;bottom:0;left:0;right:0;z-index:150;background:var(--surface);color:var(--text-primary);
+  border-top:1px solid var(--line);max-height:52vh;display:flex;flex-direction:column}
+.dock header{display:flex;align-items:center;gap:12px;padding:9px 14px;border-bottom:1px solid var(--line)}
+.dock .body{overflow:auto;padding:4px 0 10px}
+.dock table{width:100%;border-collapse:collapse}
+.dock th{font-family:var(--body);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-secondary);
+  text-align:left;padding:0 10px 9px;border-bottom:1px solid var(--line);white-space:nowrap}
+.dock td{padding:11px 10px;border-bottom:1px solid var(--line);font-size:14px;vertical-align:middle}
+.dock table td,.dock table th{font-family:var(--body);font-size:10.5px;padding:6px 10px;white-space:nowrap}
+.call{padding:7px 14px;border-bottom:1px solid var(--line);font-family:var(--body);font-size:11.5px;
+  cursor:pointer;width:100%;text-align:left;display:block;background:none;color:inherit}
+.call:hover{background:var(--surface-raised)}
+.call .l1{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.who{font-size:9px;letter-spacing:.12em;padding:1px 5px;border-radius:4px}
+.who.MEMBER{background:rgba(200,164,106,.2);color:var(--primary)}
+.who.COACH{background:rgba(169,124,66,.25);color:var(--status-limited)}
+.who.ADMIN{background:rgba(185,87,62,.2);color:var(--error)}
+.who.SYSTEM{background:rgba(240,239,233,.12);color:var(--text-secondary)}
+.verb{color:var(--primary);font-weight:700}
+.meta{margin-left:auto;color:var(--text-secondary)}
+.call pre{margin-top:7px;white-space:pre-wrap;word-break:break-word;color:var(--text-secondary);font-size:10.5px;
+  line-height:1.5;background:var(--surface-raised);padding:9px;border-radius:var(--r);max-height:240px;overflow:auto}
+.tabs{display:flex;gap:6px;overflow-x:auto}
+.tabs button{padding:5px 9px;border-radius:var(--r);font-family:var(--body);font-size:10px;letter-spacing:.08em;
+  color:var(--text-secondary);border:1px solid var(--line);white-space:nowrap;background:none;cursor:pointer}
+.tabs button[aria-pressed=true]{background:var(--primary);color:var(--background);border-color:var(--primary);font-weight:700}
+
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
