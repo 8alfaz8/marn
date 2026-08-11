@@ -36,7 +36,23 @@ export const copy = {
     readinessPending: 'Awaiting readiness screening',
     recordMeasurements: 'Record measurements',
     logSession: 'Log session',
+    startScreening: 'Start screening',
+    rescreen: 'Re-screen',
     close: 'Close',
+  },
+
+  parq: {
+    heading: 'Readiness screening',
+    hint: 'Ask each question and record their answer. A checked box means "yes."',
+    noteLabel: 'Note (optional)',
+    noteHelper: 'Only staff see this.',
+    save: 'Save screening',
+    saving: 'Saving…',
+    cleared: 'Cleared. This member can now be booked.',
+    redFlag: 'Not cleared — refer this member to a doctor before they book. This does not clear from within the app.',
+    failed: 'That screening could not be saved. Try again.',
+    referral: 'Referred to a doctor — not cleared to book.',
+    screenedOn: (when: string) => `Last screened ${when}`,
   },
 
   flags: {

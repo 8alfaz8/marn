@@ -39,8 +39,14 @@ point of view until it's rebuilt there against real auth and a real schema.
 Started 2026-08-11: the first vertical slice at the repo root, staff-side
 only (coach console, studio manager console, and — added later the same
 day — a superadmin console spanning every site: `docs/adr/0008-studio-manager-role.md`,
-`docs/adr/0011-superadmin-role-and-cash-ledger.md`), no member-facing UI
-yet. Code paths below are relative to the repo root, not `prototype/`.
+`docs/adr/0011-superadmin-role-and-cash-ledger.md`). **Update, later the same
+day:** the three remaining Phase 1 items — readiness screening, scoring
+engine, and the read-only member portal (`docs/adr/0013-member-portal-access-link.md`)
+— were built to close out Phase 1 at root. Phase 1 (blueprint §11) is now
+**done end to end at root**: schema, coach auth, member roster, readiness
+screening, assessment capture, session logging, safety flags, scoring
+engine, manual booking entry, and a read-only member portal. Code paths
+below are relative to the repo root, not `prototype/`.
 **Verified working end-to-end against a live database, browser-driven, at
 every stage** — not just `tsc`/`build`: logged in as the seeded studio
 manager, created a member and a coach account through the real UI, signed
@@ -50,12 +56,19 @@ picker, the floor-view day timeline and reschedule/reassign actions, the
 member detail drawer, the superadmin console's cross-site dashboard and
 cash ledger, and a full create-site → create-manager → sign-in-as-that-
 manager → confirm-site-isolation loop — see `docs/decisions.md` entries
-dated 2026-08-11 for what each check actually exercised. Database is Neon,
-temporarily — `docs/adr/0010-neon-interim-production-database.md`.
+dated 2026-08-11 for what each check actually exercised. **The readiness
+screening / scoring / member portal pass below is also fully
+browser-verified**, via Playwright driven against a throwaway
+site/manager/coach (created and deleted for the check, not left live) —
+including a genuine onboarding deadlock this verification pass caught and
+fixed (a coach couldn't reach a first-time member to screen them; see
+`docs/decisions.md`'s later 2026-08-11 entry for the bug and the fix in
+`lib/authz.ts`/`lib/actions/members.ts`). Database is Neon, temporarily —
+`docs/adr/0010-neon-interim-production-database.md`.
 
 | Module | Code path | Status |
 |---|---|---|
-| Schema | `db/schema.ts`, `db/auth-schema.ts`, `drizzle.config.ts`, `drizzle/0000_loud_namorita.sql`, `drizzle/0001_freezing_groot.sql`, `drizzle/0002_giant_beyonder.sql` | **done and pushed** — 16 tables live in the `marn-root` Neon project (`docs/adr/0007`, `docs/adr/0010`, `docs/adr/0011`, `docs/adr/0012`) |
+| Schema | `db/schema.ts`, `db/auth-schema.ts`, `drizzle.config.ts`, `drizzle/0000_loud_namorita.sql`, `drizzle/0001_freezing_groot.sql`, `drizzle/0002_giant_beyonder.sql`, `drizzle/0003_aromatic_la_nuit.sql` | **done and pushed** — 18 tables live in the `marn-root` Neon project (`docs/adr/0007`, `docs/adr/0010`, `docs/adr/0011`, `docs/adr/0012`, `docs/adr/0013`) |
 | Staff auth | `lib/auth.ts`, `app/api/auth/[...all]/route.ts`, `db/seed.ts`, `app/login/page.tsx`, `lib/auth-client.ts` | **done and verified live** — `better-auth` email+password, staff-only identity domain. `db/seed.ts` bootstrapped the first studio manager (`manager@marn.studio`) and optionally a superadmin (`SEED_SUPERADMIN_*` env vars, unset by default); everyone else is created by an authenticated manager (`lib/actions/staff.ts`'s `createStaffAccount`, site-locked) or superadmin (`createStaffAccountForSite`, any site, never role `superadmin`) |
 | Brand theme | `theme/theme.ts`, `app/layout.tsx` | **done, two real bugs fixed 2026-08-11** — `colorSchemeSelector` was set to the `'data'` shorthand (targets a boolean `[data-dark]` attribute) instead of the literal `'data-mui-color-scheme'` `InitColorSchemeScript` actually sets, and `ThemeProvider` was missing its own `defaultMode="dark"` prop (defaults to `'system'`, overwriting the script's attribute post-hydration). Both silently rendered light mode past `tsc`/`build` — only caught by an actual browser check. See `docs/decisions.md` |
 | Authorization layer | `lib/authz.ts` | **done** — `StaffSession` is a discriminated union on `role` (`coach`/`studio_manager` carry a non-null `siteId`, `superadmin` carries `null`); `requireStaff`/`requireCoach`/`requireStudioManager`/`requireSuperadmin`/`requireStudioManagerOrSuperadmin` resolve the better-auth session to a `staff` row and gate by role, each returning a type-narrowed session so existing site-scoped call sites needed no changes. `assertMemberInScope` is the single enforcement point for the coach/manager/superadmin data split; `roleHome(role)` maps a role to its console route. Two resolvers: `getRealStaffSession()` (signed-in human) and `getStaffSession()` (effective identity, impersonation applied) — `docs/adr/0012` |
@@ -66,6 +79,9 @@ temporarily — `docs/adr/0010-neon-interim-production-database.md`.
 | Coach console | `app/coach/page.tsx`, `components/coach/*` | **done** — read-only today's schedule, roster scoped to assigned members (no contact fields) with an open-flag indicator at list level (2026-08-11, product owner request), one consolidated member-context panel (check-ins/sessions/measurements/flags), inline (non-modal) measurement capture and session logging, flag raise/clear. Strings centralised in `components/coach/copy.ts` |
 | Studio manager console | `app/studio/page.tsx`, `components/studio/*` | **done** — dashboard stat tiles, floor view for any date the manager picks (not just today) with end times and a per-coach day timeline (`DayTimeline.tsx`), manual booking intake through a shift-and-overlap-aware slot-chip picker (`TimeSlotPicker.tsx`, `getCoachDayAvailability`) rather than a raw time input, reschedule/reassign row actions sharing the same overlap guard as booking creation, staff roster + shift assignment + new staff account creation, member roster with a detail drawer (session history, measurements, booking/charge history — `MemberDetailDrawer.tsx`, reuses `getMemberContext` rather than duplicating it). Strings centralised in `components/studio/copy.ts` |
 | Superadmin console | `app/superadmin/page.tsx`, `components/superadmin/*` | **done** — cross-site dashboard (platform totals + per-site breakdown), coach workload (shift/booked hours next 7 days, sessions completed last 7 — shared action with the studio console's future use), cash ledger (booking revenue derived + manual entries, superadmin-recorded for now), studio creation, cross-site staff roster with reassign-to-site and create-staff-at-any-site. Strings centralised in `components/superadmin/copy.ts` |
+| Readiness screening | `db/schema.ts` (`parqScreenings`), `lib/reference.ts` (`PARQ_QUESTIONS`), `lib/actions/parq.ts`, `components/coach/CaptureForms.tsx` (`ParqScreeningForm`) | **done, browser-verified** — PAR-Q-derived questionnaire, coach-administered (blueprint §4.1.10, reversing the prototype's self-service exception in `docs/adr/0001` now that root has a coach console to run it in). A red-flag answer sets `members.parqCleared` false and shows a persistent in-app referral message with no in-app clearing path; a clean screening clears the member immediately, staff-attributed, no expiry. `createBooking` (`lib/actions/bookings.ts`) refuses an uncleared member — "cleared members can book; uncleared members cannot," per the blueprint's exact wording. Session logging is not separately gated: a session normally follows an already-gated booking. Required widening `assertMemberInScope`/`getCoachMembers` (`lib/authz.ts`, `lib/actions/members.ts`) so an unscreened member is visible to any coach at the site, not just an assigned one — otherwise no coach could ever reach a first-timer to screen them (caught via browser verification, see `docs/decisions.md`) |
+| Scoring engine | `lib/scoring.ts`, `lib/scores.ts` | **done** for Flexibility and Mobility (blueprint §5.4 formulas, unchanged from the prototype's, independently written per `docs/adr/0005`'s precedent); Recovery is real for its `recentRpe` term (latest logged session) but `adherence` and `streak` are hardcoded to `0` — both are home-programme-fed inputs (§4.1.6) and home programmes aren't built at root (Phase 2), so the function doesn't estimate a number it has no real signal for. `hasWearable` is `false` for the same reason as the prototype's own documented placeholder (§4.1.9, Phase 3). Consistency (the blueprint's fourth composite) still isn't implemented, same pre-existing gap as the prototype. Pure functions, no DB/React imports; unit-tested via `scripts/test-scoring.ts` (`npx tsx`, matches `scripts/test-scheduling.ts`'s pattern) |
+| Member portal | `app/m/[token]/page.tsx`, `components/member/*`, `lib/actions/memberPortal.ts`, `lib/actions/memberAccess.ts`, `db/schema.ts` (`memberAccessTokens`) | **done**, read-only — scores, priority areas, a region-grouped range list standing in for "body map" this pass (see deviations below), and session history. No member auth: a staff-issued, revocable link is the sole credential this phase (`docs/adr/0013`). Generated/copied/revoked from the studio console's member detail drawer (`MemberAccessSection` in `MemberDetailDrawer.tsx`) — coach console has no entry point, since coaches don't hold member contact fields to send the link with (`docs/adr/0008`) |
 
 ### Root product deviations (2026-08-11)
 
@@ -94,6 +110,19 @@ Deliberately scoped out of this pass, not silently trimmed:
   them — matches the existing `sessions`/`bookings` split elsewhere in the
   schema, not a new inconsistency, but worth knowing when the two numbers
   don't visually reconcile.
+- **The member portal's "body map" is a region-grouped bar list, not an
+  anatomical figure.** Matches the coach console's own `MeasurementsSection`,
+  which uses the same grid-not-figure presentation — this pass didn't
+  introduce a new visual pattern, and building/sourcing an anatomical SVG
+  (the prototype's, per `docs/adr/0004`, or a new one) was treated as
+  separable polish, not required for the Phase 1 exit criterion ("every
+  member can see their results").
+- **`lib/actions/members.ts`'s `setMemberParqCleared` is now clearly
+  superseded, pre-existing dead code.** It was already unused before this
+  pass (a raw boolean toggle with no structured screening data, no
+  red-flag distinction); `submitParqScreening` (`lib/actions/parq.ts`) is
+  the real path now. Left in place per CLAUDE.md ("mention pre-existing
+  dead code, don't delete it") rather than removed as a drive-by cleanup.
 
 ## Deviations from the blueprint, by module
 

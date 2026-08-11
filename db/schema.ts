@@ -36,6 +36,8 @@ export const auditAction = pgEnum('audit_action', [
   'staff_site_assigned',
   'cash_entry_recorded',
   'staff_impersonated',
+  'member_access_link_created',
+  'member_access_link_revoked',
 ]);
 
 export const sites = pgTable('sites', {
@@ -210,4 +212,37 @@ export const cashLedger = pgTable('cash_ledger', {
   relatedBookingId: text('related_booking_id').references(() => bookings.id),
   recordedByStaffId: text('recorded_by_staff_id').notNull().references(() => staff.id),
   recordedAt: timestamp('recorded_at').defaultNow().notNull(),
+});
+
+/* One row per readiness screening event (blueprint §4.1.10, PAR-Q-derived,
+   completed with a coach). `redFlag` false is what "cleared" means for that
+   event; `members.parqCleared`/`parqAt` are a denormalized read of the
+   latest event, written only by lib/actions/parq.ts, so the booking/session
+   gate stays a single-column check. No clearing on the member's own say-so
+   and no automatic expiry (Iron Rule) — every row here is staff-attributed
+   and a fresh red flag always overwrites a prior clearance. */
+export const parqScreenings = pgTable('parq_screenings', {
+  id: text('id').primaryKey(),
+  memberId: text('member_id').notNull().references(() => members.id),
+  staffId: text('staff_id').notNull().references(() => staff.id),
+  siteId: text('site_id').notNull().references(() => sites.id),
+  answers: jsonb('answers').$type<Record<string, boolean>>().notNull(),
+  redFlag: boolean('red_flag').notNull(),
+  note: text('note'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+/* Staff-issued, revocable read-only link for the Phase 1 member portal —
+   no member auth yet (blueprint Phase 2), so the token itself is the only
+   credential. Generating a new one revokes any prior active token for that
+   member (one live link at a time), so a leaked link can be invalidated by
+   just generating a fresh one. */
+export const memberAccessTokens = pgTable('member_access_tokens', {
+  id: serial('id').primaryKey(),
+  token: text('token').notNull().unique(),
+  memberId: text('member_id').notNull().references(() => members.id),
+  createdByStaffId: text('created_by_staff_id').notNull().references(() => staff.id),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  revokedAt: timestamp('revoked_at'),
+  revokedByStaffId: text('revoked_by_staff_id').references(() => staff.id),
 });

@@ -1,13 +1,14 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Chip from '@mui/material/Chip';
+import CircularProgress from '@mui/material/CircularProgress';
 import Divider from '@mui/material/Divider';
 import Drawer from '@mui/material/Drawer';
 import LinearProgress from '@mui/material/LinearProgress';
-import CircularProgress from '@mui/material/CircularProgress';
 import Stack from '@mui/material/Stack';
 import Table from '@mui/material/Table';
 import TableBody from '@mui/material/TableBody';
@@ -17,6 +18,7 @@ import TableRow from '@mui/material/TableRow';
 import Typography from '@mui/material/Typography';
 import { getMemberBookingHistory } from '@/lib/actions/bookings';
 import { getMemberContext } from '@/lib/actions/members';
+import { getActiveMemberAccessToken, generateMemberAccessLink, revokeMemberAccessLink } from '@/lib/actions/memberAccess';
 import { MUSCLES, serviceById } from '@/lib/reference';
 import { copy } from './copy';
 import { BookingStatusChip, formatDay, formatNumber } from './primitives';
@@ -109,6 +111,97 @@ function SessionsSection({ context }: { context: MemberContext }) {
             )}
           </Box>
         ))
+      )}
+    </Stack>
+  );
+}
+
+/** Module scope, per CLAUDE.md's known trap — an inline sub-component here
+ *  would remount (and lose the copied/error state) on every drawer refresh. */
+function MemberAccessSection({ memberId }: { memberId: string }) {
+  const [token, setToken] = useState<string | null | undefined>(undefined);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setToken(undefined);
+    getActiveMemberAccessToken(memberId).then((t) => {
+      if (!cancelled) setToken(t);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [memberId]);
+
+  const linkFor = (t: string) => `${window.location.origin}/m/${t}`;
+
+  const onGenerate = async () => {
+    setError(null);
+    setMessage(null);
+    setBusy(true);
+    try {
+      const t = await generateMemberAccessLink(memberId);
+      setToken(t);
+      await navigator.clipboard.writeText(linkFor(t));
+      setMessage(`${copy.memberAccess.generated} ${copy.memberAccess.copied}`);
+    } catch {
+      setError(copy.memberAccess.failed);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onCopy = async () => {
+    if (!token) return;
+    await navigator.clipboard.writeText(linkFor(token));
+    setMessage(copy.memberAccess.copied);
+  };
+
+  const onRevoke = async () => {
+    setError(null);
+    setMessage(null);
+    setBusy(true);
+    try {
+      await revokeMemberAccessLink(memberId);
+      setToken(null);
+      setMessage(copy.memberAccess.revoked);
+    } catch {
+      setError(copy.memberAccess.failed);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Stack spacing={1.5}>
+      <SectionHeading>{copy.memberAccess.heading}</SectionHeading>
+      <Typography variant="body2" sx={{ color: 'text.secondary' }}>{copy.memberAccess.subtitle}</Typography>
+      {error && <Alert severity="error">{error}</Alert>}
+      {message && <Alert severity="success">{message}</Alert>}
+      {token === undefined ? (
+        <CircularProgress size={20} />
+      ) : (
+        <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
+          {token ? (
+            <>
+              <Button size="small" variant="outlined" disabled={busy} onClick={onCopy}>
+                {copy.memberAccess.copy}
+              </Button>
+              <Button size="small" variant="outlined" disabled={busy} onClick={onGenerate}>
+                {copy.memberAccess.regenerate}
+              </Button>
+              <Button size="small" color="error" disabled={busy} onClick={onRevoke}>
+                {copy.memberAccess.revoke}
+              </Button>
+            </>
+          ) : (
+            <Button size="small" variant="outlined" disabled={busy} onClick={onGenerate}>
+              {copy.memberAccess.generate}
+            </Button>
+          )}
+        </Stack>
       )}
     </Stack>
   );
@@ -215,6 +308,8 @@ export default function MemberDetailDrawer({ member, onClose }: { member: Member
               context &&
               bookings && (
                 <Stack spacing={3}>
+                  <Divider />
+                  <MemberAccessSection memberId={member.id} />
                   <Divider />
                   <MeasurementsSection context={context} />
                   <Divider />

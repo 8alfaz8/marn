@@ -183,6 +183,20 @@ export const copy = {
     colStatus: 'Status',
   },
 
+  memberAccess: {
+    heading: 'Their progress link',
+    subtitle: 'A read-only link to their own scores and history — no password. Generating a new one disables the old one.',
+    generate: 'Generate link',
+    regenerate: 'Generate new link',
+    revoke: 'Disable link',
+    copy: 'Copy',
+    copied: 'Copied.',
+    revoked: 'Link disabled.',
+    generated: 'New link generated — the old one no longer works.',
+    failed: 'That did not work. Try again.',
+    none: 'No active link yet.',
+  },
+
   form: {
     saving: 'Saving…',
     failed: 'That did not save. Check the details and try again.',

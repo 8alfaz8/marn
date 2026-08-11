@@ -78,7 +78,23 @@ it). The mismatch redirect target is `roleHome(session.role)`
 2. `components/studio/MemberDetailDrawer.tsx` — on open, `Promise.all([getMemberContext(member.id), getMemberBookingHistory(member.id)])` →
 3. `lib/actions/members.ts` `getMemberContext()` — `requireStaff()` + `assertMemberInScope()` (full-detail pass-through for `studio_manager`), returns identity/checkins/sessions/assessments/measurements/flags — same function `components/coach/MemberContextPanel.tsx` calls, role-branched identity →
 4. `lib/actions/bookings.ts` `getMemberBookingHistory()` — `requireStudioManager()` + `assertMemberInScope()`, site-scoped booking rows, newest first →
-5. drawer renders three read-only sections (Measurements, Session history, Booking and charge history) from the combined result.
+5. drawer renders four read-only-or-link-management sections: `MemberAccessSection` (module-scope, fetches `getActiveMemberAccessToken()` on open — see the member-portal-access flow below), Measurements, Session history, Booking and charge history.
+
+## Member portal: staff issues a link, member views it
+
+**Entry point:** `/studio` Members tab → detail drawer's "Their progress link"
+(generation); `/m/[token]` (member's own view)
+
+**Path (staff issues/regenerates a link):**
+1. `components/studio/MemberDetailDrawer.tsx` `MemberAccessSection` — "Generate link" → `generateMemberAccessLink(memberId)` (`lib/actions/memberAccess.ts`) →
+2. `requireStaff()` + `assertMemberInScope()`, revokes any existing non-revoked `member_access_tokens` row for that member, inserts a fresh one (`crypto.randomBytes(24)`, base64url), `logAudit(..., 'member_access_link_created', 'member', memberId)` →
+3. component builds `${window.location.origin}/m/${token}` client-side and copies it via `navigator.clipboard`.
+
+**Path (member opens the link):**
+1. `app/m/[token]/page.tsx` — no session/auth check, calls `getMemberPortalData(token)` (`lib/actions/memberPortal.ts`) →
+2. looks up the token in `member_access_tokens` (must be non-revoked), resolves the owning `members` row; a missing/revoked token short-circuits to `null` →
+3. `lib/scores.ts` `getMemberScores()` — loads the latest `assessments`/`measurements`, the most recent `sessions.rpe`, calls `lib/scoring.ts`'s `computeScores()`/`priorityAreas()` (`adherence`/`streak`/`hasWearable` all placeholder-zero, no home-programme data source yet) →
+4. page also loads the 20 most recent `sessions` rows, then renders `components/member/MemberPortal.tsx` (scores, priority areas, region-grouped range list, session history) — or the "link isn't valid" state if step 2 returned `null`.
 
 ## Superadmin: acting as another staff member ("View as")
 
@@ -120,9 +136,21 @@ All three call `router.refresh()` on success (via the shared `useFormSubmit`), w
 **Path:**
 1. `app/coach/page.tsx` `CoachPage()` (app/coach/page.tsx:12) — `getStaffSession()` + role gate, then `getCoachScheduleToday()`/`getCoachMembers()` in parallel, narrowed field-by-field before reaching the client →
 2. `components/coach/CoachConsole.tsx` `onSelect()` (components/coach/CoachConsole.tsx:183) → `load()` (components/coach/CoachConsole.tsx:170) →
-3. `lib/actions/members.ts` `getMemberContext()` (lib/actions/members.ts:68) — re-authorizes via `requireStaff()`, then `assertMemberInScope()` (`lib/authz.ts:76`) before touching any per-member table →
-4. `components/coach/MemberContextPanel.tsx` renders the result; `MeasurementCapture`/`SessionLogForm` (`components/coach/CaptureForms.tsx`) call `createManualAssessment`/`logSession` on save →
+3. `lib/actions/members.ts` `getMemberContext()` (lib/actions/members.ts:68) — re-authorizes via `requireStaff()`, then `assertMemberInScope()` (`lib/authz.ts:76`) before touching any per-member table; also loads the latest `parq_screenings` row for the referral-note banner →
+4. `components/coach/MemberContextPanel.tsx` renders the result; `ParqScreeningForm`/`MeasurementCapture`/`SessionLogForm` (`components/coach/CaptureForms.tsx`) call `submitParqScreening`/`createManualAssessment`/`logSession` on save →
 5. save calls `onChanged()` back in `CoachConsole.tsx`, which re-runs step 2–3 (stale-while-revalidate — the panel never unmounts) and `router.refresh()`s the server-fetched schedule/roster
+
+## Coach: readiness screening (PAR-Q)
+
+**Entry point:** `/coach`, member context panel, "Start screening"/"Re-screen"
+
+**Path:**
+0. `lib/actions/members.ts` `getCoachMembers()` unions the coach's normally-assigned members with *every not-yet-screened member at the site* — without this branch a first-time member (no booking/session yet, since `createBooking` now refuses unscreened members) would never appear in any coach's roster at all, a deadlock caught via browser-driven verification (`docs/decisions.md`, 2026-08-11) →
+1. `components/coach/CaptureForms.tsx` `ParqScreeningForm` (module-scope, per the known-trap rule — survives the panel's background refresh with answers intact) — checkbox per `lib/reference.ts`'s `PARQ_QUESTIONS`, optional note, calls `submitParqScreening(memberId, answers, note)` →
+2. `lib/actions/parq.ts` `submitParqScreening()` — `requireCoach()` + `assertMemberInScope()` (also widened: an unscreened member is in scope for any coach at the site, not just an assigned one — same fix, `lib/authz.ts`); `redFlag` is `true` if any answer marked `redFlag: true` in `PARQ_QUESTIONS` was checked →
+3. inserts a `parq_screenings` row (full answers, `redFlag`, note, staff/site attribution), then updates `members.parqCleared`/`parqAt` — `!redFlag`/`now()` if clean, `false`/`null` if red-flagged (a fresh red flag always overwrites a prior clearance) →
+4. `logAudit(..., 'readiness_changed', 'member', memberId)` →
+5. `lib/actions/bookings.ts` `createBooking()` reads `members.parqCleared` (via `assertMemberInScope`'s return) before `assertNoOverlap` — an uncleared member's booking is refused with a plain error, no separate flow. Once cleared, step 0's widened branch no longer applies and the member reverts to ordinary booking/session-tied scoping (confirmed live: the coach's roster dropped the member again immediately after a clean screening, before any booking existed).
 
 ## Studio manager: manual booking intake
 
@@ -130,5 +158,5 @@ All three call `router.refresh()` on success (via the shared `useFormSubmit`), w
 **Path:**
 1. `app/studio/page.tsx` `StudioPage()` (app/studio/page.tsx:18) — `getStaffSession()` + role gate, then five reads in parallel including `getManagerDashboard()` (`lib/actions/dashboard.ts`) →
 2. `components/studio/FloorPanel.tsx` `onSubmit()` (components/studio/FloorPanel.tsx:57) — price/duration read from `lib/reference.ts`'s `SERVICES`, never typed →
-3. `lib/actions/bookings.ts` `createBooking()` (lib/actions/bookings.ts:39) — `requireStudioManager()`, inserts a `confirmed` booking with a coach already assigned (no separate request-then-approve step in this slice — `docs/decisions.md`, 2026-08-11), writes an audit log row →
+3. `lib/actions/bookings.ts` `createBooking()` (lib/actions/bookings.ts:39) — `requireStudioManager()`, `assertMemberInScope()` then refuses if `members.parqCleared` is false (readiness screening flow, above) before `assertNoOverlap`; inserts a `confirmed` booking with a coach already assigned (no separate request-then-approve step in this slice — `docs/decisions.md`, 2026-08-11), writes an audit log row →
 4. `components/studio/primitives.tsx` `useFormSubmit()`'s `run()` shows the success `Snackbar` and calls `router.refresh()`, which re-runs step 1 server-side

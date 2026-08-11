@@ -136,6 +136,10 @@ export async function createBooking(input: {
   aed: number;
 }) {
   const session = await requireStudioManager();
+  const member = await assertMemberInScope(session, input.memberId);
+  if (!member.parqCleared) {
+    throw new Error('This member has not been cleared by a readiness screening yet — book their PAR-Q with a coach first.');
+  }
   const id = `bkg_${randomUUID()}`;
   await db.transaction(async (tx) => {
     await assertNoOverlap(tx, input);

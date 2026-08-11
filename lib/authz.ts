@@ -162,6 +162,18 @@ export async function requireStudioManagerOrSuperadmin(): Promise<
  * site-scoped at all (docs/adr/0011) — full cross-site access, the same
  * unrestricted read a studio manager has at their own site, just not
  * site-locked.
+ *
+ * A not-yet-screened member is also in scope for *any* coach at the site,
+ * not just an assigned one — readiness screening is "completed with a
+ * coach at first visit" (blueprint §4.1.10), and a first-timer has no
+ * booking/session by definition. Without this, no coach could ever reach a
+ * new member to screen them, and `createBooking`'s readiness gate means
+ * they could also never get a booking — a dead end discovered via
+ * browser-driven verification (`docs/decisions.md`, 2026-08-11). An
+ * unscreened member has no session/measurement/flag history yet to protect
+ * from a coach who isn't "theirs," so this narrowly reopens exactly the gap
+ * that's blocking, nothing more — once cleared, the ordinary
+ * booking/session tie applies again.
  */
 export async function assertMemberInScope(session: StaffSession, memberId: string) {
   const [member] = await db.select().from(schema.members).where(eq(schema.members.id, memberId)).limit(1);
@@ -169,6 +181,7 @@ export async function assertMemberInScope(session: StaffSession, memberId: strin
   if (session.role === 'superadmin') return member;
   if (member.siteId !== session.siteId) throw new ForbiddenError('Member not at your site');
   if (session.role === 'studio_manager') return member;
+  if (!member.parqCleared) return member;
 
   const [booking] = await db
     .select({ id: schema.bookings.id })

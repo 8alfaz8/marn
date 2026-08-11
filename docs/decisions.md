@@ -14,6 +14,85 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-11 — Closing out Phase 1 at root: readiness screening, scoring, member portal
+
+**Change:** built the three Phase 1 items root was still missing —
+coach-administered PAR-Q screening (`lib/actions/parq.ts`,
+`parq_screenings` table), the scoring engine (`lib/scoring.ts`, ported
+independently from the prototype per `docs/adr/0005`'s precedent, plus
+`lib/scores.ts` to wire it to real data), and a read-only member portal
+(`app/m/[token]`) reachable via a staff-issued access link
+(`docs/adr/0013-member-portal-access-link.md`).
+
+**Why the booking gate is narrower than it looks:** the blueprint's exact
+wording is "cleared members can book; uncleared members cannot" — nothing
+about session logging or about open safety flags blocking booking. Both were
+considered and deliberately left out: an open flag is informational (the
+existing journey docs already show a member with an open flag still booking
+and attending normally), and a session almost always follows a booking that
+was already gated at creation, so gating it a second time would be
+redundant for the one path that matters and incomplete protection for the
+walk-in-without-a-booking edge case either way. Only `createBooking` checks
+`parqCleared`.
+
+**Why Recovery's `adherence`/`streak` are hardcoded to 0 rather than
+estimated from session attendance:** both are home-programme-fed inputs
+per blueprint §5.4, and home programmes are Phase 2 (§4.1.6) — not built at
+root. Approximating them from `sessions` attendance (e.g., "distinct days
+with a session in the last N days") would fabricate a metric the blueprint
+never defined that way, contradicting the wellness-studio Iron Rule's spirit
+of "never invent a number." Leaving them at the same documented-placeholder
+value the codebase already uses for `hasWearable` keeps the function honest
+about what it's actually measuring today.
+
+**Why "body map" is a region-grouped bar list, not an anatomical figure, in
+the new member portal:** the root coach console's own `MeasurementsSection`
+already presents measurements the same way (grid of bars, not an SVG
+figure) — matching that precedent is more consistent than introducing a new
+visual pattern for a Phase 1 slice, and sourcing/building an anatomical
+figure was separable polish, not required for the blueprint's Phase 1 exit
+criterion ("every member can see their results"). Noted as a deliberate
+scope cut in `docs/architecture/overview.md`, not a silent trim.
+
+**Trade-off accepted (member portal access):** a staff-issued, revocable
+bearer link stands in for member authentication this phase — see
+`docs/adr/0013` for the full reasoning and its consequences.
+
+**Verified, fully browser-driven:** `npx tsc --noEmit` and `npm run build`
+both clean; `npx tsx scripts/test-scoring.ts` 11/11. Installed Playwright
+into an isolated scratch directory (not added to the product's
+`package.json`) and drove the whole loop against a running `npm run dev`,
+screenshotting each step, using a throwaway site/manager/coach created and
+then deleted for this: signed in as a studio manager, added a member
+(PAR-Q pending), generated their progress link; signed in as a coach,
+submitted a red-flag PAR-Q screening (referral banner shown, no in-app
+clear path); as manager, confirmed booking that member is refused with the
+exact readiness-gate error; as coach, re-screened clean (chip flips,
+confirmed against the live DB — both screening rows present with full
+provenance); as manager, booking then succeeded; recorded measurements and
+logged a session as coach; reloaded the member's link with no staff
+session at all and confirmed real scores (Flexibility 89, Mobility 89,
+Recovery 64), priority areas, and the session summary rendered; revoked
+the link and confirmed the same URL now shows "This link isn't valid" with
+no member data in the response.
+
+**Bug found and fixed during this pass:** a genuine deadlock, not a
+pre-existing one — `getCoachMembers()` only ever listed members with a
+booking or session already tied to that coach, and the new booking gate
+above means an unscreened member can never get a first booking. Together
+these meant no coach could ever reach a first-time member to screen them,
+and no first-time member could ever get past the gate — the exact feature
+this pass was building would have been unreachable in the actual product.
+Fixed by widening `getCoachMembers()` and `assertMemberInScope()`
+(`lib/authz.ts`) so a not-yet-screened member is visible to *any* coach at
+their site, not just an assigned one; the moment they're cleared, ordinary
+booking/session scoping takes back over (confirmed live: the coach's
+roster correctly dropped the member again right after the clean
+screening, before any booking existed). Full reasoning in the updated
+comments on both functions. This is exactly the kind of defect a build
+that stops at `tsc`/`build` cannot catch — only walking the real flow
+surfaced it.
+
 ## 2026-08-11 — Impersonation needs two session resolvers, not one
 
 **Change:** `lib/authz.ts` now exposes `getRealStaffSession()` (the signed-in
