@@ -76,3 +76,38 @@ off.
 8. Can clear a flag (Amira's shoulder note, or Tom's PAR-Q flag if he never completes the self-service form himself) directly from the record. **[built]**
 9. What Sara's console does *not* show, by deliberate choice made after the blueprint was written: coach outcome metrics, revenue, and studio-wide capacity — all pulled out of the coach console and moved to the separate Administration surface, because the product owner didn't want coaches seeing the business side of the studio. This is narrower than the blueprint's own Phase 3 intent, which has coaches seeing *their own* outcome numbers as a coaching tool (§4.2.7) — currently they see none of it.
 10. Obvious next step for Sara: the next name on the schedule. Nothing in the console blocks on a modal or a slow save — matches the "if the console is slower than a paper notebook, coaches will use the notebook" design constraint (§3.2), though this hasn't been timed against a real coach yet (§14.6's own risk register item — "watch a coach use it in person before believing any of it works" — still open).
+
+---
+
+## Root product — readiness screening and the member portal (2026-08-11)
+
+Everything above is the prototype. The root product (`docs/architecture/overview.md`'s
+"Root product status" table) now covers Phase 1's remaining two journey
+steps at the coach and member surfaces, coach-administered rather than
+self-service (`docs/adr/0001` was a prototype-only exception):
+
+1. A coach opens a member's context panel and taps "Start screening." Seven
+   PAR-Q-derived questions, checkboxes, an optional note. **[built]** — a
+   clean screening clears the member (chip flips, booking unblocks
+   immediately); a red-flag answer shows a persistent referral banner with
+   no in-app way to clear it, and the studio manager's booking form refuses
+   that member with a plain error until a clean re-screening.
+2. A studio manager opens that same member's detail drawer and generates a
+   "progress link" — a plain URL, no password. **[built]** — copies to the
+   clipboard automatically; generating again invalidates the previous link.
+3. The member opens the link on their own phone: their current Flexibility/
+   Mobility/Recovery scores (from their latest assessment), priority areas,
+   a region-grouped range list standing in for a full body map this pass,
+   and their session history with each coach's plain-language summary.
+   **[built]**, read-only, no sign-in. A revoked or mistyped link shows a
+   plain "this link isn't valid" state, not an error page.
+4. **Not yet built at root:** progress-over-time (a single latest snapshot
+   only, no trend line — no chart dependency added this pass), and Recovery
+   is real for effort but not for adherence or streak (no home-programme
+   data source exists yet, blueprint Phase 2). See
+   `docs/architecture/overview.md`'s root deviations for the full list.
+5. **Browser-verified**, step by step, via Playwright against a throwaway
+   account (see `docs/decisions.md`'s 2026-08-11 entry) — including catching
+   and fixing a real onboarding deadlock (a coach couldn't reach a
+   first-time, unscreened member at all) that a build/type-check pass alone
+   would never have surfaced.

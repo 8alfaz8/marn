@@ -13,9 +13,10 @@ import { pgTable, pgEnum, text, integer, boolean, timestamp, jsonb, serial, date
    change only (see db/index.ts).
 --------------------------------------------------------------------------- */
 
-export const staffRole = pgEnum('staff_role', ['coach', 'studio_manager']);
+export const staffRole = pgEnum('staff_role', ['coach', 'studio_manager', 'superadmin']);
 export const bookingStatus = pgEnum('booking_status', ['requested', 'confirmed', 'declined', 'completed', 'cancelled']);
 export const measurementSource = pgEnum('measurement_source', ['bodymap', 'coach_manual', 'member_report']);
+export const cashLedgerType = pgEnum('cash_ledger_type', ['manual_in', 'manual_out']);
 export const auditAction = pgEnum('audit_action', [
   'assessment_created',
   'assessment_amended',
@@ -27,8 +28,16 @@ export const auditAction = pgEnum('audit_action', [
   'booking_requested',
   'booking_approved',
   'booking_declined',
+  'booking_rescheduled',
+  'booking_reassigned',
   'shift_assigned',
   'staff_read_outside_site',
+  'site_created',
+  'staff_site_assigned',
+  'cash_entry_recorded',
+  'staff_impersonated',
+  'member_access_link_created',
+  'member_access_link_revoked',
 ]);
 
 export const sites = pgTable('sites', {
@@ -39,16 +48,18 @@ export const sites = pgTable('sites', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
-/* Coaches and studio managers. Auth credentials live in better-auth's own
-   user/account/session tables (lib/auth) — this is the business-domain
-   record, joined by authUserId. Kept separate from `members` per blueprint
-   §10.1: a coach account is never a member account with a flag set. */
+/* Coaches, studio managers, and superadmins. Auth credentials live in
+   better-auth's own user/account/session tables (lib/auth) — this is the
+   business-domain record, joined by authUserId. Kept separate from
+   `members` per blueprint §10.1: a coach account is never a member account
+   with a flag set. `siteId` is nullable only for `superadmin` — a coach or
+   studio_manager is always pinned to exactly one site (docs/adr/0011). */
 export const staff = pgTable('staff', {
   id: text('id').primaryKey(),
   authUserId: text('auth_user_id').notNull().unique(),
   name: text('name').notNull(),
   role: staffRole('role').notNull(),
-  siteId: text('site_id').notNull().references(() => sites.id),
+  siteId: text('site_id').references(() => sites.id),
   active: boolean('active').default(true).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
@@ -186,4 +197,52 @@ export const auditLog = pgTable('audit_log', {
   entityType: text('entity_type').notNull(),
   entityId: text('entity_id').notNull(),
   at: timestamp('at').defaultNow().notNull(),
+});
+
+/* Cash movements that aren't a booking — walk-in payments, refunds,
+   till adjustments. Booking revenue keeps deriving from `bookings.aed`
+   (unchanged, docs/adr/0007); this table only covers the gap that leaves
+   (docs/adr/0011). Superadmin-recorded for now. */
+export const cashLedger = pgTable('cash_ledger', {
+  id: serial('id').primaryKey(),
+  siteId: text('site_id').notNull().references(() => sites.id),
+  type: cashLedgerType('type').notNull(),
+  amountAed: integer('amount_aed').notNull(),
+  note: text('note'),
+  relatedBookingId: text('related_booking_id').references(() => bookings.id),
+  recordedByStaffId: text('recorded_by_staff_id').notNull().references(() => staff.id),
+  recordedAt: timestamp('recorded_at').defaultNow().notNull(),
+});
+
+/* One row per readiness screening event (blueprint §4.1.10, PAR-Q-derived,
+   completed with a coach). `redFlag` false is what "cleared" means for that
+   event; `members.parqCleared`/`parqAt` are a denormalized read of the
+   latest event, written only by lib/actions/parq.ts, so the booking/session
+   gate stays a single-column check. No clearing on the member's own say-so
+   and no automatic expiry (Iron Rule) — every row here is staff-attributed
+   and a fresh red flag always overwrites a prior clearance. */
+export const parqScreenings = pgTable('parq_screenings', {
+  id: text('id').primaryKey(),
+  memberId: text('member_id').notNull().references(() => members.id),
+  staffId: text('staff_id').notNull().references(() => staff.id),
+  siteId: text('site_id').notNull().references(() => sites.id),
+  answers: jsonb('answers').$type<Record<string, boolean>>().notNull(),
+  redFlag: boolean('red_flag').notNull(),
+  note: text('note'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+/* Staff-issued, revocable read-only link for the Phase 1 member portal —
+   no member auth yet (blueprint Phase 2), so the token itself is the only
+   credential. Generating a new one revokes any prior active token for that
+   member (one live link at a time), so a leaked link can be invalidated by
+   just generating a fresh one. */
+export const memberAccessTokens = pgTable('member_access_tokens', {
+  id: serial('id').primaryKey(),
+  token: text('token').notNull().unique(),
+  memberId: text('member_id').notNull().references(() => members.id),
+  createdByStaffId: text('created_by_staff_id').notNull().references(() => staff.id),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  revokedAt: timestamp('revoked_at'),
+  revokedByStaffId: text('revoked_by_staff_id').references(() => staff.id),
 });

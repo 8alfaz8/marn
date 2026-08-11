@@ -4,6 +4,8 @@ import { useId, useState } from 'react';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
+import Checkbox from '@mui/material/Checkbox';
+import FormControlLabel from '@mui/material/FormControlLabel';
 import Grid from '@mui/material/Grid';
 import MenuItem from '@mui/material/MenuItem';
 import Slider from '@mui/material/Slider';
@@ -12,9 +14,10 @@ import TextField from '@mui/material/TextField';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import Typography from '@mui/material/Typography';
-import { MUSCLES, serviceById } from '@/lib/reference';
+import { MUSCLES, PARQ_QUESTIONS, serviceById } from '@/lib/reference';
 import { createManualAssessment } from '@/lib/actions/assessments';
 import { logSession } from '@/lib/actions/sessions';
+import { submitParqScreening } from '@/lib/actions/parq';
 import { copy } from './copy';
 import type { ScheduleBooking } from './types';
 
@@ -89,6 +92,75 @@ export function MeasurementCapture({ memberId, onSaved }: { memberId: string; on
       <Box>
         <Button type="submit" variant="contained" disabled={status === 'saving'}>
           {status === 'saving' ? copy.capture.saving : copy.capture.save}
+        </Button>
+      </Box>
+    </Stack>
+  );
+}
+
+export function ParqScreeningForm({ memberId, onSaved }: { memberId: string; onSaved: () => void }) {
+  const [answers, setAnswers] = useState<Record<string, boolean>>({});
+  const [note, setNote] = useState('');
+  const [status, setStatus] = useState<'idle' | 'saving'>('idle');
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<'cleared' | 'redFlag' | null>(null);
+
+  const onSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setResult(null);
+    setStatus('saving');
+    try {
+      const { redFlag } = await submitParqScreening(memberId, answers, note.trim() || undefined);
+      setResult(redFlag ? 'redFlag' : 'cleared');
+      if (!redFlag) {
+        setAnswers({});
+        setNote('');
+      }
+      onSaved();
+    } catch {
+      setError(copy.parq.failed);
+    } finally {
+      setStatus('idle');
+    }
+  };
+
+  return (
+    <Stack component="form" onSubmit={onSubmit} spacing={2}>
+      <Box>
+        <Typography variant="h6">{copy.parq.heading}</Typography>
+        <Typography variant="body2" color="text.secondary">{copy.parq.hint}</Typography>
+      </Box>
+      {error && <Alert severity="error">{error}</Alert>}
+      {result === 'cleared' && <Alert severity="success">{copy.parq.cleared}</Alert>}
+      {result === 'redFlag' && <Alert severity="warning">{copy.parq.redFlag}</Alert>}
+      <Stack spacing={0.5}>
+        {PARQ_QUESTIONS.map((q) => (
+          <FormControlLabel
+            key={q.key}
+            control={
+              <Checkbox
+                checked={answers[q.key] ?? false}
+                onChange={(e) => setAnswers((a) => ({ ...a, [q.key]: e.target.checked }))}
+              />
+            }
+            label={q.text}
+          />
+        ))}
+      </Stack>
+      <TextField
+        size="small"
+        fullWidth
+        multiline
+        minRows={2}
+        label={copy.parq.noteLabel}
+        helperText={copy.parq.noteHelper}
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+      />
+      <Box>
+        <Button type="submit" variant="contained" disabled={status === 'saving'}>
+          {status === 'saving' ? copy.parq.saving : copy.parq.save}
         </Button>
       </Box>
     </Stack>

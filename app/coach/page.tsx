@@ -1,7 +1,8 @@
 import { redirect } from 'next/navigation';
-import { getStaffSession } from '@/lib/authz';
+import { getStaffSession, roleHome } from '@/lib/authz';
 import { getCoachScheduleToday } from '@/lib/actions/bookings';
 import { getCoachMembers } from '@/lib/actions/members';
+import { getImpersonationContext } from '@/lib/actions/impersonation';
 import StaffChrome from '@/components/StaffChrome';
 import CoachConsole from '@/components/coach/CoachConsole';
 import { copy } from '@/components/coach/copy';
@@ -12,9 +13,13 @@ import { copy } from '@/components/coach/copy';
 export default async function CoachPage() {
   const session = await getStaffSession();
   if (!session) redirect('/login');
-  if (session.role !== 'coach') redirect('/studio');
+  if (session.role !== 'coach') redirect(roleHome(session.role));
 
-  const [schedule, roster] = await Promise.all([getCoachScheduleToday(), getCoachMembers()]);
+  const [schedule, roster, impersonation] = await Promise.all([
+    getCoachScheduleToday(),
+    getCoachMembers(),
+    getImpersonationContext(),
+  ]);
 
   /* Narrowed field by field on the way to the client, not spread: a booking
      row carries `aed` and a manager's member row carries phone/email, and
@@ -34,7 +39,7 @@ export default async function CoachPage() {
   }));
 
   return (
-    <StaffChrome title={copy.chromeTitle} staffName={session.name} role="coach">
+    <StaffChrome title={copy.chromeTitle} staffName={session.name} role="coach" impersonation={impersonation}>
       <CoachConsole staffName={session.name} bookings={bookings} members={members} />
     </StaffChrome>
   );

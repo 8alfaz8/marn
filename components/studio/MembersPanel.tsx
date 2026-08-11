@@ -15,17 +15,19 @@ import TableRow from '@mui/material/TableRow';
 import TextField from '@mui/material/TextField';
 import { createMember } from '@/lib/actions/members';
 import { copy } from './copy';
+import MemberDetailDrawer from './MemberDetailDrawer';
 import { EmptyState, SectionCard, formatDay, useFormSubmit } from './primitives';
 import type { Member } from './types';
 
-/* Roster and contact details only. Everything a member's record holds about
-   their sessions — check-ins, measurements, readiness, flags — belongs to the
-   coach console; this console is the front desk, not the floor. */
+/* Roster and contact details, plus (docs/adr/0008: a studio manager is
+   unrestricted at their site, unlike a coach) a drill-in to session history,
+   measurements, and booking/charge history via MemberDetailDrawer. */
 export default function MembersPanel({ members }: { members: Member[] }) {
   const { pending, error, notice, setError, setNotice, run } = useFormSubmit();
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
+  const [selected, setSelected] = useState<Member | null>(null);
 
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -61,6 +63,7 @@ export default function MembersPanel({ members }: { members: Member[] }) {
                       <TableCell>{copy.members.colPhone}</TableCell>
                       <TableCell>{copy.members.colEmail}</TableCell>
                       <TableCell>{copy.members.colSince}</TableCell>
+                      <TableCell align="right">{copy.members.colAction}</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -70,6 +73,11 @@ export default function MembersPanel({ members }: { members: Member[] }) {
                         <TableCell>{member.phone}</TableCell>
                         <TableCell>{member.email ?? copy.members.noEmail}</TableCell>
                         <TableCell>{formatDay(member.createdAt)}</TableCell>
+                        <TableCell align="right">
+                          <Button size="small" onClick={() => setSelected(member)}>
+                            {copy.members.viewDetails}
+                          </Button>
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -117,6 +125,7 @@ export default function MembersPanel({ members }: { members: Member[] }) {
         onClose={() => setNotice(null)}
         message={notice ?? ''}
       />
+      <MemberDetailDrawer member={selected} onClose={() => setSelected(null)} />
     </Stack>
   );
 }

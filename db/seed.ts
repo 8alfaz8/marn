@@ -6,7 +6,13 @@ import { db, schema } from './index';
    other staff account is created by an authenticated studio manager
    afterwards (lib/authz.ts's requireStudioManager gate on that server
    action) — this script exists only because nothing can log in yet the
-   very first time. Run once: `SEED_MANAGER_EMAIL=... SEED_MANAGER_PASSWORD=... npm run db:seed`. */
+   very first time. Run once: `SEED_MANAGER_EMAIL=... SEED_MANAGER_PASSWORD=... npm run db:seed`.
+
+   SEED_SUPERADMIN_EMAIL/PASSWORD/NAME are optional and independent of the
+   manager bootstrap above — set them to also create a superadmin account
+   (docs/adr/0011), `siteId: null`. Omit them and this block is skipped;
+   every other staff account after either bootstrap goes through an
+   authenticated server action, never a hardcoded credential in source. */
 
 async function main() {
   const email = process.env.SEED_MANAGER_EMAIL;
@@ -33,6 +39,23 @@ async function main() {
   });
 
   console.log(`Bootstrapped studio manager ${email} at ${site.name}.`);
+
+  const superadminEmail = process.env.SEED_SUPERADMIN_EMAIL;
+  const superadminPassword = process.env.SEED_SUPERADMIN_PASSWORD;
+  if (superadminEmail && superadminPassword) {
+    const superadminName = process.env.SEED_SUPERADMIN_NAME ?? 'Superadmin';
+    const { user: superadminUser } = await auth.api.signUpEmail({
+      body: { email: superadminEmail, password: superadminPassword, name: superadminName },
+    });
+    await db.insert(schema.staff).values({
+      id: `staff_${superadminUser.id}`,
+      authUserId: superadminUser.id,
+      name: superadminName,
+      role: 'superadmin',
+      siteId: null,
+    });
+    console.log(`Bootstrapped superadmin ${superadminEmail}.`);
+  }
 }
 
 main()

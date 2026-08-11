@@ -16,7 +16,7 @@ import Typography from '@mui/material/Typography';
 import { MUSCLES } from '@/lib/reference';
 import { clearFlag, raiseFlag } from '@/lib/actions/flags';
 import { copy } from './copy';
-import { MeasurementCapture, SessionLogForm } from './CaptureForms';
+import { MeasurementCapture, ParqScreeningForm, SessionLogForm } from './CaptureForms';
 import type { MemberContext, ScheduleBooking } from './types';
 
 /* Everything a coach needs before and during the session, on one surface.
@@ -305,8 +305,8 @@ export default function MemberContextPanel({
   loading: boolean;
   onChanged: () => void;
 }) {
-  const [open, setOpen] = useState<'measure' | 'log' | null>(null);
-  const toggle = (which: 'measure' | 'log') => setOpen((cur) => (cur === which ? null : which));
+  const [open, setOpen] = useState<'measure' | 'log' | 'parq' | null>(null);
+  const toggle = (which: 'measure' | 'log' | 'parq') => setOpen((cur) => (cur === which ? null : which));
 
   return (
     <Stack spacing={2}>
@@ -329,7 +329,10 @@ export default function MemberContextPanel({
               label={context.parqCleared ? copy.member.readinessCleared : copy.member.readinessPending}
             />
           </Stack>
-          <Stack direction="row" spacing={1}>
+          <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
+            <Button variant={open === 'parq' ? 'contained' : 'outlined'} onClick={() => toggle('parq')}>
+              {open === 'parq' ? copy.member.close : context.parqCleared ? copy.member.rescreen : copy.member.startScreening}
+            </Button>
             <Button variant={open === 'measure' ? 'contained' : 'outlined'} onClick={() => toggle('measure')}>
               {open === 'measure' ? copy.member.close : copy.member.recordMeasurements}
             </Button>
@@ -339,9 +342,19 @@ export default function MemberContextPanel({
           </Stack>
         </Stack>
 
+        {!context.parqCleared && context.latestParqScreening?.redFlag && (
+          <Alert severity="warning" sx={{ marginBlockStart: 2 }}>
+            {copy.parq.referral}
+          </Alert>
+        )}
+
         {/* Kept mounted (Collapse, not conditional render) so half-entered
             values are still there if the coach collapses the panel to read
             the member's history and comes back. */}
+        <Collapse in={open === 'parq'} unmountOnExit={false}>
+          <Divider sx={{ marginBlock: 2 }} />
+          <ParqScreeningForm memberId={context.member.id} onSaved={onChanged} />
+        </Collapse>
         <Collapse in={open === 'measure'} unmountOnExit={false}>
           <Divider sx={{ marginBlock: 2 }} />
           <MeasurementCapture memberId={context.member.id} onSaved={onChanged} />

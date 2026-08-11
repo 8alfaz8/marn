@@ -26,6 +26,7 @@ const todayIso = () => new Date().toISOString().slice(0, 10);
 const ROLE_LABEL: Record<StaffMember['role'], string> = {
   coach: copy.staff.roles.coach,
   studio_manager: copy.staff.roles.studio_manager,
+  superadmin: copy.staff.roles.superadmin,
 };
 
 /* Who works here and when. Shift assignment is studio-manager-only
@@ -40,7 +41,9 @@ export default function StaffPanel({ staff, shifts }: { staff: StaffMember[]; sh
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [role, setRole] = useState<StaffMember['role']>('coach');
+  // createStaffAccount is studio-manager-gated and site-scoped — this form
+  // deliberately never offers 'superadmin'.
+  const [role, setRole] = useState<'coach' | 'studio_manager'>('coach');
 
   const staffNames = new Map(staff.map((s) => [s.id, s.name]));
   const assignable = staff.filter((s) => s.active);
@@ -235,7 +238,7 @@ export default function StaffPanel({ staff, shifts }: { staff: StaffMember[]; sh
                   size="small"
                   label={copy.newStaff.role}
                   value={role}
-                  onChange={(e) => setRole(e.target.value as StaffMember['role'])}
+                  onChange={(e) => setRole(e.target.value as 'coach' | 'studio_manager')}
                 >
                   <MenuItem value="coach">{ROLE_LABEL.coach}</MenuItem>
                   <MenuItem value="studio_manager">{ROLE_LABEL.studio_manager}</MenuItem>
