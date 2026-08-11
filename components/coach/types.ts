@@ -19,9 +19,12 @@ export type ScheduleBooking = {
   status: BookingRow['status'];
 };
 
-/** Roster row for a coach: no phone/email, ever (docs/adr/0008). */
+/** Roster row for a coach: no phone/email, ever (docs/adr/0008).
+ *  `hasOpenFlag` lets the list itself surface who needs attention, not just
+ *  the member-context panel after tapping in (2026-08-11). */
 export type RosterMember = {
   id: string;
   name: string;
   parqCleared: boolean;
+  hasOpenFlag: boolean;
 };

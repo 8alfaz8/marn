@@ -30,11 +30,15 @@ export async function getManagerScheduleToday() {
 
 /**
  * Manual booking entry by staff (blueprint Phase 1 — no member self-service
- * yet). Created directly as `confirmed` with a coach assigned: the studio
- * manager is both the intake point and the approver in this slice, so
- * there's no separate requester to wait on. `requested`/`declined` stay in
- * the schema for when member self-service booking (Phase 2) introduces a
- * real request origin distinct from the approver.
+ * yet). Created directly as `confirmed`: confirmed by the product owner
+ * 2026-08-11 — "if creator is manager, then no need of approval, anyone
+ * else need approve." This function is `requireStudioManager()`-gated, so
+ * every caller today *is* the approver, which is why auto-confirm is safe
+ * here. If a future caller creates a booking on someone else's behalf (a
+ * coach quick-add, Phase 2 member self-service), that path must land the
+ * booking as `requested` and go through `declineBooking`'s sibling
+ * (a not-yet-built `approveBooking`) rather than reusing this function's
+ * auto-confirm behaviour.
  */
 export async function createBooking(input: {
   memberId: string;

@@ -29,11 +29,13 @@ import type { MemberContext, RosterMember, ScheduleBooking } from './types';
 function ScheduleSection({
   bookings,
   nameFor,
+  flagFor,
   selectedId,
   onSelect,
 }: {
   bookings: ScheduleBooking[];
   nameFor: (memberId: string) => string;
+  flagFor: (memberId: string) => boolean;
   selectedId: string | null;
   onSelect: (memberId: string) => void;
 }) {
@@ -58,6 +60,9 @@ function ScheduleSection({
                       <Stack direction="row" spacing={1} sx={{ alignItems: 'baseline' }}>
                         <Typography variant="body2" color="text.secondary">{b.time}</Typography>
                         <Typography variant="body1">{nameFor(b.memberId)}</Typography>
+                        {flagFor(b.memberId) && (
+                          <Chip size="small" color="warning" variant="outlined" label={copy.flags.indicator} />
+                        )}
                       </Stack>
                     }
                     secondary={
@@ -129,8 +134,15 @@ function RosterSection({
                     <ListItemText
                       primary={m.name}
                       secondary={
-                        m.parqCleared ? null : (
-                          <Chip size="small" variant="outlined" color="warning" label={copy.member.readinessPending} />
+                        (m.hasOpenFlag || !m.parqCleared) && (
+                          <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1, marginBlockStart: 0.5 }}>
+                            {m.hasOpenFlag && (
+                              <Chip size="small" variant="outlined" color="warning" label={copy.flags.indicator} />
+                            )}
+                            {!m.parqCleared && (
+                              <Chip size="small" variant="outlined" color="warning" label={copy.member.readinessPending} />
+                            )}
+                          </Stack>
                         )
                       }
                       slotProps={{ secondary: { component: 'div' } }}
@@ -165,6 +177,11 @@ export default function CoachConsole({
   const nameFor = useMemo(() => {
     const byId = new Map(members.map((m) => [m.id, m.name]));
     return (memberId: string) => byId.get(memberId) ?? copy.booking.unknownMember;
+  }, [members]);
+
+  const flagFor = useMemo(() => {
+    const flagged = new Set(members.filter((m) => m.hasOpenFlag).map((m) => m.id));
+    return (memberId: string) => flagged.has(memberId);
   }, [members]);
 
   const load = async (memberId: string) => {
@@ -207,7 +224,7 @@ export default function CoachConsole({
           spacing={2}
           sx={{ position: { md: 'sticky' }, insetBlockStart: (t) => t.spacing(2) }}
         >
-          <ScheduleSection bookings={bookings} nameFor={nameFor} selectedId={selectedId} onSelect={onSelect} />
+          <ScheduleSection bookings={bookings} nameFor={nameFor} flagFor={flagFor} selectedId={selectedId} onSelect={onSelect} />
           <RosterSection
             members={members}
             filter={filter}

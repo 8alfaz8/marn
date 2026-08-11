@@ -7,7 +7,9 @@ import { requireStaff, requireStudioManager, assertMemberInScope } from '@/lib/a
 import { logAudit } from '@/lib/audit';
 
 /** Roster scoped to the coach: members with a booking or session tied to
- *  them, at their site — never phone/email (docs/adr/0008). */
+ *  them, at their site — never phone/email (docs/adr/0008). Each row
+ *  carries `hasOpenFlag` so a coach can see who needs attention before
+ *  tapping in (product owner, 2026-08-11: list-level flag visibility). */
 export async function getCoachMembers() {
   const session = await requireStaff();
   if (session.role !== 'coach') return getManagerMembers();
@@ -25,10 +27,18 @@ export async function getCoachMembers() {
   const ids = [...new Set([...bookingRows.map((r) => r.id), ...sessionRows.map((r) => r.id)])];
   if (ids.length === 0) return [];
 
-  return db
-    .select({ id: schema.members.id, name: schema.members.name, parqCleared: schema.members.parqCleared })
-    .from(schema.members)
-    .where(and(inArray(schema.members.id, ids), eq(schema.members.siteId, session.siteId)));
+  const [members, openFlags] = await Promise.all([
+    db
+      .select({ id: schema.members.id, name: schema.members.name, parqCleared: schema.members.parqCleared })
+      .from(schema.members)
+      .where(and(inArray(schema.members.id, ids), eq(schema.members.siteId, session.siteId))),
+    db
+      .selectDistinct({ memberId: schema.flags.memberId })
+      .from(schema.flags)
+      .where(and(inArray(schema.flags.memberId, ids), isNull(schema.flags.clearedAt))),
+  ]);
+  const flagged = new Set(openFlags.map((f) => f.memberId));
+  return members.map((m) => ({ ...m, hasOpenFlag: flagged.has(m.id) }));
 }
 
 /** Full roster at the manager's site, contact fields included. */

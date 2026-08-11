@@ -14,6 +14,61 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-11 — Provisioned a real Neon database and fixed two real dark-theme bugs, found by actually logging in
+
+**Change:** Created a new Neon project (`marn-root`), pushed the schema,
+seeded the first studio manager, and — while verifying the login end to
+end in a real browser rather than trusting `tsc`/`build` — found the root
+app was rendering in **light mode**, not the dark-first brand theme
+everyone had been building against.
+
+**What was actually wrong (two separate bugs, not one):**
+1. `theme/theme.ts` had `cssVariables: { colorSchemeSelector: 'data' }`.
+   MUI's `'data'` shorthand generates CSS for a *boolean* `[data-dark]`/
+   `[data-light]` attribute. `InitColorSchemeScript` (in `app/layout.tsx`)
+   sets `data-mui-color-scheme="dark"` instead — a named attribute with a
+   value, which only `colorSchemeSelector: 'data-mui-color-scheme'`
+   (the literal string) matches. The dark CSS variables were never being
+   selected at all.
+2. Even after fixing that, the page still rendered light on a full
+   browser check. `<ThemeProvider theme={theme}>` has its *own*
+   `defaultMode` prop, separate from `InitColorSchemeScript`'s — without
+   it, ThemeProvider's runtime mode state defaults to `'system'` and
+   overwrites the pre-hydration script's `dark` attribute the moment
+   React hydrates, regardless of `theme.defaultColorScheme`. Headless
+   Chromium's default system preference is light, so every automated
+   check silently rendered the wrong theme.
+
+**Why this wasn't caught earlier:** the crashed background agent that
+originally wrote this theme code (see the 2026-08-11 "kept the
+out-of-scope root theme work" entry below) never got to visually verify
+it — it crashed mid-task. I chose to keep its work rather than revert,
+on the reasoning that it was "technically sound" — but "technically
+sound" was based on `tsc`/`build` passing, not a real render. Both are
+genuine bugs that only a live browser check would surface, exactly the
+gap `CLAUDE.md`'s "start the dev server and use the feature in a
+browser" rule exists to close. Fixed both in `theme/theme.ts` and
+`app/layout.tsx`, with comments citing the exact MUI source read to
+confirm each one — not guessed twice in a row on the same file.
+
+**Neon + Vercel, same session:** new project `marn-root`
+(`aws-ap-southeast-1`), separate from the prototype's — see
+`docs/adr/0010-neon-interim-production-database.md` for why Neon is
+acceptable right now despite blueprint §8.2 naming it as disallowed for
+production. The existing Vercel project (`marn`, deployed at
+`marn-seven.vercel.app`) had a 3-day-old `DATABASE_URL` (almost
+certainly pointing at the prototype's old database, from before the
+prototype/root split) and **no `BETTER_AUTH_SECRET` at all** — very
+likely why the deployed link showed nothing. Replaced `DATABASE_URL`
+and added `BETTER_AUTH_SECRET`/`BETTER_AUTH_URL` across Production/
+Preview/Development.
+
+**Verified for real, not just `tsc`/`build`:** logged in as the seeded
+studio manager against the live database, created a member and a coach
+account through the actual UI, signed out, signed in as that new coach,
+landed on `/coach` with the dark theme correctly rendering and zero
+console errors.
+
 ## 2026-08-11 — Coach and studio manager console UIs (made autonomously — flagging for review)
 
 Built by two parallel background passes consuming the already-reviewed

@@ -4,6 +4,7 @@ import Alert from '@mui/material/Alert';
 import AlertTitle from '@mui/material/AlertTitle';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
+import { copy } from '@/components/studio/copy';
 
 /* Nothing from the caught error is rendered or logged: a failure on this
    route can carry member identifiers, and those never leave the server
@@ -16,12 +17,12 @@ export default function StudioError({ reset }: { error: Error; reset: () => void
         severity="error"
         action={
           <Button color="inherit" size="small" onClick={reset}>
-            Try again
+            {copy.error.retry}
           </Button>
         }
       >
-        <AlertTitle>The floor view did not load</AlertTitle>
-        Nothing was changed. Try again, and if it keeps failing, check with support before taking bookings on paper.
+        <AlertTitle>{copy.error.title}</AlertTitle>
+        {copy.error.body}
       </Alert>
     </Box>
   );

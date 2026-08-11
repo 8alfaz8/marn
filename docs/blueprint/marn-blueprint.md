@@ -734,7 +734,9 @@ dataset after a regulator or a corporate client's procurement team asks the ques
 
 - Managed platforms without a UAE region — Supabase, Firebase, Neon, PlanetScale, Vercel's own data
   products — are unavailable for the health tier in production. **They are fine for the prototype
-  precisely because it holds no real data.**
+  precisely because it holds no real data.** As of 2026-08-11, the root product also runs against Neon
+  temporarily, for the same reason and under the same bound — no real member data yet. See
+  `docs/adr/0010-neon-interim-production-database.md` for the trigger to migrate off it.
 - Wearable aggregators such as Terra, Rook and Spike route through US or EU infrastructure. Using one
   is likely an export. Either integrate directly into the UAE backend or obtain counsel's sign-off.
 - LLM features that touch health data need a UAE-resident inference endpoint. This constrains the

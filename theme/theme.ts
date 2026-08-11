@@ -41,7 +41,13 @@ const figtree = 'var(--font-figtree), sans-serif';
 export const radii = { sm: 12, md: 18, lg: 24, pill: 999 };
 
 const theme = createTheme({
-  cssVariables: { colorSchemeSelector: 'data' },
+  // Must be the literal attribute name, not the 'data' shorthand — MUI's
+  // 'data' shorthand generates CSS for a boolean [data-dark]/[data-light]
+  // attribute, but InitColorSchemeScript (app/layout.tsx) sets
+  // data-mui-color-scheme="dark" instead, which only this exact string
+  // form matches. Mismatched before 2026-08-11; confirmed by inspecting
+  // MUI's own createGetSelector source, not guessed.
+  cssVariables: { colorSchemeSelector: 'data-mui-color-scheme' },
   defaultColorScheme: 'dark',
   direction: 'ltr',
   shape: { borderRadius: radii.md },

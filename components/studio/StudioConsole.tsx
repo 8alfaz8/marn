@@ -9,6 +9,7 @@ import Tabs from '@mui/material/Tabs';
 import FloorPanel from './FloorPanel';
 import MembersPanel from './MembersPanel';
 import StaffPanel from './StaffPanel';
+import { copy } from './copy';
 import { StatTile, formatNumber } from './primitives';
 import type { Dashboard, Member, Shift, StaffMember } from './types';
 
@@ -38,24 +39,28 @@ export default function StudioConsole({
     <Stack spacing={3}>
       <Grid container spacing={2}>
         <Grid size={{ xs: 6, md: 3 }}>
-          <StatTile label="Sessions today" value={formatNumber(dashboard.sessionsToday)} />
+          <StatTile label={copy.dashboard.sessionsToday} value={formatNumber(dashboard.sessionsToday)} />
         </Grid>
         <Grid size={{ xs: 6, md: 3 }}>
-          <StatTile label="Sessions this week" value={formatNumber(dashboard.sessionsThisWeek)} />
+          <StatTile label={copy.dashboard.sessionsThisWeek} value={formatNumber(dashboard.sessionsThisWeek)} />
         </Grid>
         <Grid size={{ xs: 6, md: 3 }}>
-          <StatTile label="Earned, last 7 days" value={formatNumber(dashboard.revenue7d)} unit="AED" />
+          <StatTile
+            label={copy.dashboard.revenue7d}
+            value={formatNumber(dashboard.revenue7d)}
+            unit={copy.dashboard.revenueUnit}
+          />
         </Grid>
         <Grid size={{ xs: 6, md: 3 }}>
-          <StatTile label="Active coaches" value={formatNumber(dashboard.activeCoachCount)} />
+          <StatTile label={copy.dashboard.activeCoaches} value={formatNumber(dashboard.activeCoachCount)} />
         </Grid>
       </Grid>
 
       <Box sx={{ borderBlockEnd: '1px solid', borderColor: 'divider' }}>
-        <Tabs value={tab} onChange={(_, next: number) => setTab(next)} aria-label="Studio manager sections">
-          <Tab label="Floor" id="studio-tab-0" aria-controls="studio-panel-0" />
-          <Tab label="Staff and shifts" id="studio-tab-1" aria-controls="studio-panel-1" />
-          <Tab label="Members" id="studio-tab-2" aria-controls="studio-panel-2" />
+        <Tabs value={tab} onChange={(_, next: number) => setTab(next)} aria-label={copy.tabs.label}>
+          <Tab label={copy.tabs.floor} id="studio-tab-0" aria-controls="studio-panel-0" />
+          <Tab label={copy.tabs.staff} id="studio-tab-1" aria-controls="studio-panel-1" />
+          <Tab label={copy.tabs.members} id="studio-tab-2" aria-controls="studio-panel-2" />
         </Tabs>
       </Box>
 

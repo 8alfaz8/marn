@@ -7,6 +7,7 @@ import Chip from '@mui/material/Chip';
 import Paper from '@mui/material/Paper';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
+import { copy } from './copy';
 import type { Booking } from './types';
 
 /* Shared pieces of the studio manager console. All at module scope, never
@@ -104,11 +105,11 @@ export function EmptyState({ message, children }: { message: string; children?: 
    operational state — a completed booking isn't itself a proof point, so it
    stays neutral rather than borrowing that colour. */
 const BOOKING_STATUS: Record<Booking['status'], { label: string; color: 'default' | 'primary' }> = {
-  requested: { label: 'Requested', color: 'default' },
-  confirmed: { label: 'Confirmed', color: 'primary' },
-  completed: { label: 'Completed', color: 'default' },
-  declined: { label: 'Declined', color: 'default' },
-  cancelled: { label: 'Cancelled', color: 'default' },
+  requested: { label: copy.bookingStatus.requested, color: 'default' },
+  confirmed: { label: copy.bookingStatus.confirmed, color: 'primary' },
+  completed: { label: copy.bookingStatus.completed, color: 'default' },
+  declined: { label: copy.bookingStatus.declined, color: 'default' },
+  cancelled: { label: copy.bookingStatus.cancelled, color: 'default' },
 };
 
 export function BookingStatusChip({ status }: { status: Booking['status'] }) {
@@ -138,7 +139,7 @@ export function useFormSubmit() {
       setNotice(successMessage);
       router.refresh();
     } catch (e) {
-      setError(e instanceof Error && e.message ? e.message : 'That did not save. Check the details and try again.');
+      setError(e instanceof Error && e.message ? e.message : copy.form.failed);
     } finally {
       setPending(false);
     }

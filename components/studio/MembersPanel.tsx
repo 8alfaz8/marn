@@ -14,6 +14,7 @@ import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import TextField from '@mui/material/TextField';
 import { createMember } from '@/lib/actions/members';
+import { copy } from './copy';
 import { EmptyState, SectionCard, formatDay, useFormSubmit } from './primitives';
 import type { Member } from './types';
 
@@ -29,7 +30,7 @@ export default function MembersPanel({ members }: { members: Member[] }) {
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     run(
-      'Member added.',
+      copy.members.added,
       () => createMember({ name, phone, email: email || undefined }),
       () => {
         setName('');
@@ -48,18 +49,18 @@ export default function MembersPanel({ members }: { members: Member[] }) {
       )}
       <Grid container spacing={3}>
         <Grid size={{ xs: 12, lg: 8 }}>
-          <SectionCard title="Members at this site" subtitle="Contact details for the front desk.">
+          <SectionCard title={copy.members.heading} subtitle={copy.members.subtitle}>
             {members.length === 0 ? (
-              <EmptyState message="No members yet. Add the first one, then take their booking." />
+              <EmptyState message={copy.members.empty} />
             ) : (
               <TableContainer>
                 <Table size="small" sx={{ minWidth: 560 }}>
                   <TableHead>
                     <TableRow>
-                      <TableCell>Name</TableCell>
-                      <TableCell>Phone</TableCell>
-                      <TableCell>Email</TableCell>
-                      <TableCell>Member since</TableCell>
+                      <TableCell>{copy.members.colName}</TableCell>
+                      <TableCell>{copy.members.colPhone}</TableCell>
+                      <TableCell>{copy.members.colEmail}</TableCell>
+                      <TableCell>{copy.members.colSince}</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -67,7 +68,7 @@ export default function MembersPanel({ members }: { members: Member[] }) {
                       <TableRow key={member.id} hover>
                         <TableCell>{member.name}</TableCell>
                         <TableCell>{member.phone}</TableCell>
-                        <TableCell>{member.email ?? '—'}</TableCell>
+                        <TableCell>{member.email ?? copy.members.noEmail}</TableCell>
                         <TableCell>{formatDay(member.createdAt)}</TableCell>
                       </TableRow>
                     ))}
@@ -79,12 +80,12 @@ export default function MembersPanel({ members }: { members: Member[] }) {
         </Grid>
 
         <Grid size={{ xs: 12, lg: 4 }}>
-          <SectionCard title="Add a member" subtitle="Name and a phone number are enough to book them in.">
+          <SectionCard title={copy.members.addHeading} subtitle={copy.members.addSubtitle}>
             <Stack component="form" spacing={2} onSubmit={onSubmit}>
               <TextField
                 required
                 size="small"
-                label="Full name"
+                label={copy.members.name}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
               />
@@ -92,19 +93,19 @@ export default function MembersPanel({ members }: { members: Member[] }) {
                 required
                 size="small"
                 type="tel"
-                label="Phone"
+                label={copy.members.phone}
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
               />
               <TextField
                 size="small"
                 type="email"
-                label="Email (optional)"
+                label={copy.members.email}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
               />
               <Button type="submit" variant="contained" disabled={pending}>
-                {pending ? 'Saving…' : 'Add member'}
+                {pending ? copy.form.saving : copy.members.submit}
               </Button>
             </Stack>
           </SectionCard>

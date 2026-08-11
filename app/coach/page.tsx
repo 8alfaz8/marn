@@ -26,7 +26,12 @@ export default async function CoachPage() {
     time: b.time,
     status: b.status,
   }));
-  const members = roster.map((m) => ({ id: m.id, name: m.name, parqCleared: m.parqCleared }));
+  const members = roster.map((m) => ({
+    id: m.id,
+    name: m.name,
+    parqCleared: m.parqCleared,
+    hasOpenFlag: 'hasOpenFlag' in m ? m.hasOpenFlag : false,
+  }));
 
   return (
     <StaffChrome title={copy.chromeTitle} staffName={session.name} role="coach">

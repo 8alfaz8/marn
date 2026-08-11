@@ -39,20 +39,22 @@ point of view until it's rebuilt there against real auth and a real schema.
 Started 2026-08-11: the first vertical slice at the repo root, staff-side
 only (coach console + a new studio manager console — `docs/adr/0008-studio-manager-role.md`),
 no member-facing UI yet. Code paths below are relative to the repo root, not
-`prototype/`. **This slice is functionally complete as of 2026-08-11** —
-`npx tsc --noEmit` and `npm run build` both clean, all five routes present
-(`/`, `/login`, `/coach`, `/studio`, `/api/auth/[...all]`). Not yet run
-against a real database — no `DATABASE_URL` provisioned.
+`prototype/`. **Verified working end-to-end against a live database as of
+2026-08-11** — not just `tsc`/`build`: logged in as the seeded studio
+manager, created a member and a coach account through the real UI, signed
+in as that coach, both consoles render correctly with zero console errors.
+Database is Neon, temporarily — `docs/adr/0010-neon-interim-production-database.md`.
 
 | Module | Code path | Status |
 |---|---|---|
-| Schema | `db/schema.ts`, `db/auth-schema.ts`, `drizzle.config.ts`, `drizzle/0000_loud_namorita.sql` | **done** for this slice's tables, 15 total incl. better-auth's own (see `docs/adr/0007-root-schema-shape.md`) — migration generated, **not pushed**, no `DATABASE_URL` provisioned yet |
-| Staff auth | `lib/auth.ts`, `app/api/auth/[...all]/route.ts`, `db/seed.ts`, `app/login/page.tsx`, `lib/auth-client.ts` | **done** — `better-auth` email+password, staff-only identity domain. `db/seed.ts` bootstraps the first studio manager (no public sign-up route); everyone else is created by an authenticated manager via `lib/actions/staff.ts`'s `createStaffAccount`. Untestable end-to-end without a provisioned `DATABASE_URL` |
+| Schema | `db/schema.ts`, `db/auth-schema.ts`, `drizzle.config.ts`, `drizzle/0000_loud_namorita.sql` | **done and pushed** — 15 tables live in the `marn-root` Neon project (`docs/adr/0007`, `docs/adr/0010`) |
+| Staff auth | `lib/auth.ts`, `app/api/auth/[...all]/route.ts`, `db/seed.ts`, `app/login/page.tsx`, `lib/auth-client.ts` | **done and verified live** — `better-auth` email+password, staff-only identity domain. `db/seed.ts` bootstrapped the first studio manager (`manager@marn.studio`); everyone else is created by an authenticated manager via `lib/actions/staff.ts`'s `createStaffAccount` (verified — used to create a real coach account through the UI) |
+| Brand theme | `theme/theme.ts`, `app/layout.tsx` | **done, two real bugs fixed 2026-08-11** — `colorSchemeSelector` was set to the `'data'` shorthand (targets a boolean `[data-dark]` attribute) instead of the literal `'data-mui-color-scheme'` `InitColorSchemeScript` actually sets, and `ThemeProvider` was missing its own `defaultMode="dark"` prop (defaults to `'system'`, overwriting the script's attribute post-hydration). Both silently rendered light mode past `tsc`/`build` — only caught by an actual browser check. See `docs/decisions.md` |
 | Authorization layer | `lib/authz.ts` | **done** — `requireStaff`/`requireCoach`/`requireStudioManager` resolve the better-auth session to a `staff` row and gate by role; every server action/route handler calls these, never trusts a client-supplied id. `assertMemberInScope` is the single enforcement point for the coach-vs-manager data split |
 | BodyMap adapter | `lib/integrations/bodymap/index.ts` | **done**, manual-entry only — `fromDeviceApi`/`fromExportFile` stubbed, matching the prototype's own precedent. Independently written, not a port (`docs/adr/0005`) |
 | Data / server actions layer | `lib/actions/{members,bookings,assessments,sessions,flags,shifts,staff,dashboard}.ts` | **done** for this slice — every action authorizes via `lib/authz.ts` first; see `docs/decisions.md` (2026-08-11) for the judgment calls made building it |
-| Coach console | `app/coach/page.tsx`, `components/coach/*` | **done** — read-only today's schedule, roster scoped to assigned members (no contact fields), one consolidated member-context panel (check-ins/sessions/measurements/flags), inline (non-modal) measurement capture and session logging, flag raise/clear. Strings centralised in `components/coach/copy.ts` |
-| Studio manager console | `app/studio/page.tsx`, `components/studio/*` | **done** — dashboard stat tiles, today's floor activity, manual booking intake (price/duration derived from `lib/reference.ts`, never typed), staff roster + shift assignment + new staff account creation, member roster + contact info + new member creation. **Known gap:** user-facing strings are inline literals, not extracted to a copy module like the coach console — matches `StaffChrome`/`login`'s prior precedent (also since fixed) rather than inventing a third convention; needs one pass across `components/studio/*` before Arabic/RTL work starts |
+| Coach console | `app/coach/page.tsx`, `components/coach/*` | **done** — read-only today's schedule, roster scoped to assigned members (no contact fields) with an open-flag indicator at list level (2026-08-11, product owner request), one consolidated member-context panel (check-ins/sessions/measurements/flags), inline (non-modal) measurement capture and session logging, flag raise/clear. Strings centralised in `components/coach/copy.ts` |
+| Studio manager console | `app/studio/page.tsx`, `components/studio/*` | **done** — dashboard stat tiles, today's floor activity, manual booking intake (price/duration derived from `lib/reference.ts`, never typed), staff roster + shift assignment + new staff account creation, member roster + contact info + new member creation. Strings centralised in `components/studio/copy.ts` (99 entries, extracted 2026-08-11 — the earlier gap is closed) |
 
 ## Deviations from the blueprint, by module
 

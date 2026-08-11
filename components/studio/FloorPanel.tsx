@@ -17,6 +17,7 @@ import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import { createBooking, declineBooking } from '@/lib/actions/bookings';
 import { SERVICES, serviceById } from '@/lib/reference';
+import { copy } from './copy';
 import { BookingStatusChip, EmptyState, SectionCard, formatNumber, useFormSubmit } from './primitives';
 import type { Booking, Member, StaffMember } from './types';
 
@@ -58,7 +59,7 @@ export default function FloorPanel({
     e.preventDefault();
     if (!service) return;
     run(
-      'Booking confirmed.',
+      copy.booking.confirmed,
       () => createBooking({ memberId, coachId, serviceId, date, time, aed: service.aed }),
       () => {
         setMemberId('');
@@ -76,31 +77,33 @@ export default function FloorPanel({
       )}
       <Grid container spacing={3}>
         <Grid size={{ xs: 12, lg: 8 }}>
-          <SectionCard title="Today on the floor" subtitle="Every booking at your site today.">
+          <SectionCard title={copy.floor.heading} subtitle={copy.floor.subtitle}>
             {schedule.length === 0 ? (
-              <EmptyState message="Nothing booked today yet. Take the first one with the booking form." />
+              <EmptyState message={copy.floor.empty} />
             ) : (
               <TableContainer>
                 <Table size="small" sx={{ minWidth: 640 }}>
                   <TableHead>
                     <TableRow>
-                      <TableCell>Time</TableCell>
-                      <TableCell>Member</TableCell>
-                      <TableCell>Service</TableCell>
-                      <TableCell>Coach</TableCell>
-                      <TableCell align="right">AED</TableCell>
-                      <TableCell>Status</TableCell>
-                      <TableCell align="right">Action</TableCell>
+                      <TableCell>{copy.floor.colTime}</TableCell>
+                      <TableCell>{copy.floor.colMember}</TableCell>
+                      <TableCell>{copy.floor.colService}</TableCell>
+                      <TableCell>{copy.floor.colCoach}</TableCell>
+                      <TableCell align="right">{copy.floor.colAed}</TableCell>
+                      <TableCell>{copy.floor.colStatus}</TableCell>
+                      <TableCell align="right">{copy.floor.colAction}</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
                     {byTime.map((booking) => (
                       <TableRow key={booking.id} hover>
                         <TableCell>{booking.time}</TableCell>
-                        <TableCell>{memberNames.get(booking.memberId) ?? 'Unknown member'}</TableCell>
+                        <TableCell>{memberNames.get(booking.memberId) ?? copy.floor.unknownMember}</TableCell>
                         <TableCell>{serviceById(booking.serviceId)?.name ?? booking.serviceId}</TableCell>
                         <TableCell>
-                          {booking.coachId ? staffNames.get(booking.coachId) ?? 'Unknown coach' : 'Unassigned'}
+                          {booking.coachId
+                            ? staffNames.get(booking.coachId) ?? copy.floor.unknownCoach
+                            : copy.floor.unassigned}
                         </TableCell>
                         <TableCell align="right">{formatNumber(booking.aed)}</TableCell>
                         <TableCell>
@@ -111,9 +114,9 @@ export default function FloorPanel({
                             <Button
                               size="small"
                               disabled={pending}
-                              onClick={() => run('Booking declined.', () => declineBooking(booking.id))}
+                              onClick={() => run(copy.floor.declined, () => declineBooking(booking.id))}
                             >
-                              Decline
+                              {copy.floor.decline}
                             </Button>
                           )}
                         </TableCell>
@@ -127,17 +130,13 @@ export default function FloorPanel({
         </Grid>
 
         <Grid size={{ xs: 12, lg: 4 }}>
-          <SectionCard title="New booking" subtitle="For a member calling in or walking up to the desk.">
+          <SectionCard title={copy.booking.heading} subtitle={copy.booking.subtitle}>
             {!canBook ? (
               <EmptyState
-                message={
-                  members.length === 0
-                    ? 'Add a member before taking a booking.'
-                    : 'Add a coach account before taking a booking.'
-                }
+                message={members.length === 0 ? copy.booking.noMembers : copy.booking.noCoaches}
               >
                 <Button variant="contained" onClick={() => onGoToTab(members.length === 0 ? 2 : 1)}>
-                  {members.length === 0 ? 'Go to members' : 'Go to staff'}
+                  {members.length === 0 ? copy.booking.goToMembers : copy.booking.goToStaff}
                 </Button>
               </EmptyState>
             ) : (
@@ -146,7 +145,7 @@ export default function FloorPanel({
                   select
                   required
                   size="small"
-                  label="Member"
+                  label={copy.booking.member}
                   value={memberId}
                   onChange={(e) => setMemberId(e.target.value)}
                 >
@@ -160,7 +159,7 @@ export default function FloorPanel({
                   select
                   required
                   size="small"
-                  label="Coach"
+                  label={copy.booking.coach}
                   value={coachId}
                   onChange={(e) => setCoachId(e.target.value)}
                 >
@@ -174,7 +173,7 @@ export default function FloorPanel({
                   select
                   required
                   size="small"
-                  label="Service"
+                  label={copy.booking.service}
                   value={serviceId}
                   onChange={(e) => setServiceId(e.target.value)}
                 >
@@ -189,7 +188,7 @@ export default function FloorPanel({
                     required
                     size="small"
                     type="date"
-                    label="Date"
+                    label={copy.booking.date}
                     value={date}
                     onChange={(e) => setDate(e.target.value)}
                     slotProps={{ inputLabel: { shrink: true } }}
@@ -199,7 +198,7 @@ export default function FloorPanel({
                     required
                     size="small"
                     type="time"
-                    label="Time"
+                    label={copy.booking.time}
                     value={time}
                     onChange={(e) => setTime(e.target.value)}
                     slotProps={{ inputLabel: { shrink: true } }}
@@ -208,11 +207,11 @@ export default function FloorPanel({
                 </Stack>
                 {service && (
                   <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                    {`${service.mins} min · AED ${formatNumber(service.aed)}, from the price list.`}
+                    {copy.booking.priceHint(service.mins, formatNumber(service.aed))}
                   </Typography>
                 )}
                 <Button type="submit" variant="contained" disabled={pending}>
-                  {pending ? 'Saving…' : 'Confirm booking'}
+                  {pending ? copy.form.saving : copy.booking.submit}
                 </Button>
               </Stack>
             )}

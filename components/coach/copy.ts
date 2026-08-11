@@ -41,6 +41,7 @@ export const copy = {
 
   flags: {
     heading: 'Open safety flags',
+    indicator: 'Flag',
     none: 'No open safety flags.',
     raisedOn: (when: string) => `Raised ${when}`,
     clear: 'Clear flag',

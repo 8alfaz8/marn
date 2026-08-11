@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import StaffChrome from '@/components/StaffChrome';
 import StudioConsole from '@/components/studio/StudioConsole';
+import { copy } from '@/components/studio/copy';
 import { getStaffSession } from '@/lib/authz';
 import { getManagerDashboard } from '@/lib/actions/dashboard';
 import { getManagerMembers } from '@/lib/actions/members';
@@ -29,7 +30,7 @@ export default async function StudioPage() {
   ]);
 
   return (
-    <StaffChrome title="Studio operations" staffName={session.name} role="studio_manager">
+    <StaffChrome title={copy.chromeTitle} staffName={session.name} role="studio_manager">
       <StudioConsole
         dashboard={dashboard}
         members={members}
