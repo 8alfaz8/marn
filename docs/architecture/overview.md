@@ -45,9 +45,11 @@ no member-facing UI yet. Code paths below are relative to the repo root, not
 |---|---|---|
 | Schema | `db/schema.ts`, `db/auth-schema.ts`, `drizzle.config.ts`, `drizzle/0000_loud_namorita.sql` | **done** for this slice's tables, 15 total incl. better-auth's own (see `docs/adr/0007-root-schema-shape.md`) — migration generated, **not pushed**, no `DATABASE_URL` provisioned yet |
 | Staff auth | `lib/auth.ts`, `app/api/auth/[...all]/route.ts`, `db/seed.ts` | **done** — `better-auth` email+password, staff-only identity domain. `db/seed.ts` bootstraps the first studio manager (no public sign-up route); everyone else is created by an authenticated manager. Untestable end-to-end without a provisioned `DATABASE_URL` |
-| Authorization layer | `lib/authz.ts` | **done** — `requireStaff`/`requireCoach`/`requireStudioManager` resolve the better-auth session to a `staff` row and gate by role; every server action/route handler built from here on calls these, never trusts a client-supplied id |
-| Coach console | not built yet | **not started** — floor schedule (read-only), assigned-member roster (check-ins, past sessions, assessment capture, session logging, flags), no contact/payment fields |
-| Studio manager console | not built yet | **not started** — shift assignment, booking approval, staff/member CRM, lightweight earnings/capacity view, floor activity |
+| Authorization layer | `lib/authz.ts` | **done** — `requireStaff`/`requireCoach`/`requireStudioManager` resolve the better-auth session to a `staff` row and gate by role; every server action/route handler built from here on calls these, never trusts a client-supplied id. `assertMemberInScope` is the single enforcement point for the coach-vs-manager data split |
+| BodyMap adapter | `lib/integrations/bodymap/index.ts` | **done**, manual-entry only — `fromDeviceApi`/`fromExportFile` stubbed, matching the prototype's own precedent. Independently written, not a port (`docs/adr/0005`) |
+| Data / server actions layer | `lib/actions/{members,bookings,assessments,sessions,flags,shifts,staff,dashboard}.ts` | **done** for this slice — every action authorizes via `lib/authz.ts` first; see `docs/decisions.md` (2026-08-11) for the judgment calls made building it |
+| Coach console | not built yet | **not started** — floor schedule (read-only), assigned-member roster (check-ins, past sessions, assessment capture, session logging, flags), no contact/payment fields. Data layer ready to consume |
+| Studio manager console | not built yet | **not started** — shift assignment, booking approval, staff/member CRM, lightweight earnings/capacity view, floor activity. Data layer ready to consume |
 
 ## Deviations from the blueprint, by module
 

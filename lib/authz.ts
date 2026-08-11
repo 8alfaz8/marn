@@ -1,5 +1,5 @@
 import { headers } from 'next/headers';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { auth } from './auth';
 import { db, schema } from '@/db';
 
@@ -64,4 +64,33 @@ export async function requireCoach(): Promise<StaffSession> {
   const session = await requireStaff();
   if (session.role !== 'coach') throw new ForbiddenError('Coach only');
   return session;
+}
+
+/**
+ * Every per-member read or write goes through this, not just the roster
+ * listing — otherwise a coach who already knows another coach's member id
+ * could read past it (docs/adr/0008: a coach only ever sees members with a
+ * booking or session tied to them, at their own site). Studio managers are
+ * scoped to their site only, no per-coach narrowing.
+ */
+export async function assertMemberInScope(session: StaffSession, memberId: string) {
+  const [member] = await db.select().from(schema.members).where(eq(schema.members.id, memberId)).limit(1);
+  if (!member || member.siteId !== session.siteId) throw new ForbiddenError('Member not at your site');
+  if (session.role === 'studio_manager') return member;
+
+  const [booking] = await db
+    .select({ id: schema.bookings.id })
+    .from(schema.bookings)
+    .where(and(eq(schema.bookings.memberId, memberId), eq(schema.bookings.coachId, session.staffId)))
+    .limit(1);
+  if (booking) return member;
+
+  const [sessionRow] = await db
+    .select({ id: schema.sessions.id })
+    .from(schema.sessions)
+    .where(and(eq(schema.sessions.memberId, memberId), eq(schema.sessions.coachId, session.staffId)))
+    .limit(1);
+  if (sessionRow) return member;
+
+  throw new ForbiddenError('Member not assigned to you');
 }

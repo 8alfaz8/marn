@@ -14,6 +14,53 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-11 — Data layer decisions for the coach/studio-manager slice (made autonomously — flagging for review)
+
+The user asked me to keep building through the rest of Phase 1 without
+stopping to ask, taking any logical decisions myself and logging them
+here for review later. These five are the real judgment calls from that
+pass — everything else was mechanical execution of `docs/adr/0007`/`0008`.
+
+**1. Manual booking creates `confirmed` directly, not `requested` → approved.**
+`lib/actions/bookings.ts`'s `createBooking` sets `status: 'confirmed'`
+immediately with a coach assigned, skipping the `requested` state.
+*Why:* the studio manager is both the intake point (member calls/walks in)
+and the approver in this slice — there's no other party to request
+*from* yet. `requested`/`declined` stay in the schema unused until
+member self-service booking (Phase 2) gives them a real origin.
+*Revisit if:* a request can originate from somewhere other than the
+manager before Phase 2 arrives (e.g. a coach taking a walk-in).
+
+**2. `assertMemberInScope` (`lib/authz.ts`) is the single enforcement point
+for the coach/manager data split**, not a per-query filter repeated in
+every action. Every per-member read or write in `lib/actions/*.ts` calls
+it before touching data. *Why:* the alternative — trusting each new
+action to independently re-derive "does this coach own this member" —
+is exactly the kind of repeated-logic drift that produces an
+authorization bug eventually. One function, one place to audit.
+
+**3. `getMemberContext` (`lib/actions/members.ts`) returns check-ins +
+session history + measurements + open flags in one call**, rather than
+four separate actions. *Why:* this is the literal shape of the coach
+journey step in `docs/design/journeys.md` — "member context before they
+walk in" — as one screen, one loading state. Splitting it into four
+round-trips would be premature decomposition with no consumer that
+wants them separately.
+
+**4. No check-in *creation* action was built.** Check-ins are member-
+self-reported per blueprint §4.1.7/§5, and this slice has no member
+portal (`docs/adr/0008`'s staff-only scope). `getMemberContext` reads
+`checkins` and will just show an empty state until Phase 2's member app
+exists to write them — not a bug, an honestly-empty feature per
+`CLAUDE.md`'s Definition of Done.
+
+**5. `logSession` closes the booking and nothing else** — blueprint
+§4.2.4 also lists "decrements credits, advances streak, recomputes
+scores," all three of which depend on systems out of scope here
+(credits/payments per `docs/adr/0007`, member-facing progress per this
+slice's staff-only scope). Flagged in a code comment at the call site,
+not silently dropped.
+
 ## 2026-08-11 — Bootstrap the first studio manager via a seed script, not a public sign-up route
 
 **Change:** `db/seed.ts`, `lib/auth.ts`, `app/api/auth/[...all]/route.ts`.
