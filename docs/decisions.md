@@ -14,6 +14,53 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-11 — Bootstrap the first studio manager via a seed script, not a public sign-up route
+
+**Change:** `db/seed.ts`, `lib/auth.ts`, `app/api/auth/[...all]/route.ts`.
+
+**Chose:** No public sign-up UI or route is wired to `better-auth`'s
+`signUpEmail` — the first studio manager is created by running
+`npm run db:seed` with `SEED_MANAGER_EMAIL`/`SEED_MANAGER_PASSWORD` env
+vars. Every staff account after that is meant to be created by an
+authenticated studio manager through a `requireStudioManager()`-gated
+server action (not built yet — next up with the studio manager console).
+
+**Why:** Staff accounts are a privileged operation (they grant access to
+member health data), not a public self-service flow — nothing in the
+blueprint suggests open staff registration, and leaving `better-auth`'s
+default sign-up endpoint reachable would let anyone who finds the route
+create a coach or studio-manager account. A one-time seed script is the
+smallest thing that solves "how does the very first person log in."
+
+**Trade-off accepted:** The seed script's own account-creation call
+(`auth.api.signUpEmail`) isn't authorization-gated — it can't be, it runs
+before any session exists. It's meant to be run once, locally/via a
+deploy hook with real secrets, not left reachable as an HTTP endpoint.
+
+## 2026-08-11 — better-auth's schema generated via its own CLI, not hand-written
+
+**Change:** `db/auth-schema.ts` (user/session/account/verification
+tables), `drizzle.config.ts`'s `schema` option changed to an array
+(`['./db/schema.ts', './db/auth-schema.ts']`), `db/index.ts` merges both
+schema modules into one `drizzle()` call.
+
+**Chose:** `npx @better-auth/cli generate --config lib/auth.ts --output
+db/auth-schema.ts` over transcribing better-auth's table shape by hand
+from memory or minified dist output.
+
+**Why:** better-auth's internal table shape (column names, indexes,
+`$onUpdate` triggers) is implementation detail that can drift between
+versions; the CLI reads the actual installed version's schema
+definition, so the generated file is guaranteed correct for
+`better-auth@1.6.26` specifically rather than approximately right.
+Kept as a separate file (not merged by hand into `db/schema.ts`) so it
+stays mechanically regeneratable — a header comment says as much.
+
+**Trade-off accepted:** Two schema files instead of one — a coding
+agent unfamiliar with this pattern could edit `auth-schema.ts` directly
+and have those edits silently discarded on the next regenerate. Flagged
+in a comment at the top of the file itself, not just here.
+
 ## 2026-08-11 — Kept the out-of-scope root theme work rather than reverting it
 
 **Change:** A background agent tasked with re-theming only `prototype/`

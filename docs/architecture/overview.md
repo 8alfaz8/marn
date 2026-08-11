@@ -43,9 +43,9 @@ no member-facing UI yet. Code paths below are relative to the repo root, not
 
 | Module | Code path | Status |
 |---|---|---|
-| Schema | `db/schema.ts`, `drizzle.config.ts`, `drizzle/0000_thankful_invaders.sql` | **done** for this slice's tables (see `docs/adr/0007-root-schema-shape.md`) — migration generated, **not pushed**, no `DATABASE_URL` provisioned yet |
-| Staff auth | not built yet | **not started** — plan is `better-auth` email+password for staff, phone-OTP deferred to Phase 2 member auth (`docs/adr/0009-staff-auth-simple-credential-first.md`) |
-| Authorization layer | not built yet | **not started** — server-side role/scope enforcement (coach vs. studio manager, per-capability per `docs/adr/0008`) is the next dependency after auth lands |
+| Schema | `db/schema.ts`, `db/auth-schema.ts`, `drizzle.config.ts`, `drizzle/0000_loud_namorita.sql` | **done** for this slice's tables, 15 total incl. better-auth's own (see `docs/adr/0007-root-schema-shape.md`) — migration generated, **not pushed**, no `DATABASE_URL` provisioned yet |
+| Staff auth | `lib/auth.ts`, `app/api/auth/[...all]/route.ts`, `db/seed.ts` | **done** — `better-auth` email+password, staff-only identity domain. `db/seed.ts` bootstraps the first studio manager (no public sign-up route); everyone else is created by an authenticated manager. Untestable end-to-end without a provisioned `DATABASE_URL` |
+| Authorization layer | `lib/authz.ts` | **done** — `requireStaff`/`requireCoach`/`requireStudioManager` resolve the better-auth session to a `staff` row and gate by role; every server action/route handler built from here on calls these, never trusts a client-supplied id |
 | Coach console | not built yet | **not started** — floor schedule (read-only), assigned-member roster (check-ins, past sessions, assessment capture, session logging, flags), no contact/payment fields |
 | Studio manager console | not built yet | **not started** — shift assignment, booking approval, staff/member CRM, lightweight earnings/capacity view, floor activity |
 
