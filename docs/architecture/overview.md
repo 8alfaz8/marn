@@ -39,17 +39,20 @@ point of view until it's rebuilt there against real auth and a real schema.
 Started 2026-08-11: the first vertical slice at the repo root, staff-side
 only (coach console + a new studio manager console — `docs/adr/0008-studio-manager-role.md`),
 no member-facing UI yet. Code paths below are relative to the repo root, not
-`prototype/`.
+`prototype/`. **This slice is functionally complete as of 2026-08-11** —
+`npx tsc --noEmit` and `npm run build` both clean, all five routes present
+(`/`, `/login`, `/coach`, `/studio`, `/api/auth/[...all]`). Not yet run
+against a real database — no `DATABASE_URL` provisioned.
 
 | Module | Code path | Status |
 |---|---|---|
 | Schema | `db/schema.ts`, `db/auth-schema.ts`, `drizzle.config.ts`, `drizzle/0000_loud_namorita.sql` | **done** for this slice's tables, 15 total incl. better-auth's own (see `docs/adr/0007-root-schema-shape.md`) — migration generated, **not pushed**, no `DATABASE_URL` provisioned yet |
-| Staff auth | `lib/auth.ts`, `app/api/auth/[...all]/route.ts`, `db/seed.ts` | **done** — `better-auth` email+password, staff-only identity domain. `db/seed.ts` bootstraps the first studio manager (no public sign-up route); everyone else is created by an authenticated manager. Untestable end-to-end without a provisioned `DATABASE_URL` |
-| Authorization layer | `lib/authz.ts` | **done** — `requireStaff`/`requireCoach`/`requireStudioManager` resolve the better-auth session to a `staff` row and gate by role; every server action/route handler built from here on calls these, never trusts a client-supplied id. `assertMemberInScope` is the single enforcement point for the coach-vs-manager data split |
+| Staff auth | `lib/auth.ts`, `app/api/auth/[...all]/route.ts`, `db/seed.ts`, `app/login/page.tsx`, `lib/auth-client.ts` | **done** — `better-auth` email+password, staff-only identity domain. `db/seed.ts` bootstraps the first studio manager (no public sign-up route); everyone else is created by an authenticated manager via `lib/actions/staff.ts`'s `createStaffAccount`. Untestable end-to-end without a provisioned `DATABASE_URL` |
+| Authorization layer | `lib/authz.ts` | **done** — `requireStaff`/`requireCoach`/`requireStudioManager` resolve the better-auth session to a `staff` row and gate by role; every server action/route handler calls these, never trusts a client-supplied id. `assertMemberInScope` is the single enforcement point for the coach-vs-manager data split |
 | BodyMap adapter | `lib/integrations/bodymap/index.ts` | **done**, manual-entry only — `fromDeviceApi`/`fromExportFile` stubbed, matching the prototype's own precedent. Independently written, not a port (`docs/adr/0005`) |
 | Data / server actions layer | `lib/actions/{members,bookings,assessments,sessions,flags,shifts,staff,dashboard}.ts` | **done** for this slice — every action authorizes via `lib/authz.ts` first; see `docs/decisions.md` (2026-08-11) for the judgment calls made building it |
-| Coach console | not built yet | **not started** — floor schedule (read-only), assigned-member roster (check-ins, past sessions, assessment capture, session logging, flags), no contact/payment fields. Data layer ready to consume |
-| Studio manager console | not built yet | **not started** — shift assignment, booking approval, staff/member CRM, lightweight earnings/capacity view, floor activity. Data layer ready to consume |
+| Coach console | `app/coach/page.tsx`, `components/coach/*` | **done** — read-only today's schedule, roster scoped to assigned members (no contact fields), one consolidated member-context panel (check-ins/sessions/measurements/flags), inline (non-modal) measurement capture and session logging, flag raise/clear. Strings centralised in `components/coach/copy.ts` |
+| Studio manager console | `app/studio/page.tsx`, `components/studio/*` | **done** — dashboard stat tiles, today's floor activity, manual booking intake (price/duration derived from `lib/reference.ts`, never typed), staff roster + shift assignment + new staff account creation, member roster + contact info + new member creation. **Known gap:** user-facing strings are inline literals, not extracted to a copy module like the coach console — matches `StaffChrome`/`login`'s prior precedent (also since fixed) rather than inventing a third convention; needs one pass across `components/studio/*` before Arabic/RTL work starts |
 
 ## Deviations from the blueprint, by module
 

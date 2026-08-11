@@ -10,6 +10,7 @@ import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
 import Alert from '@mui/material/Alert';
 import { signIn } from '@/lib/auth-client';
+import { shellCopy } from '@/lib/copy';
 
 /* Staff-only login — email + password for now, phone-OTP deferred
    (docs/adr/0009). No public sign-up link here on purpose: staff accounts
@@ -31,7 +32,7 @@ export default function LoginPage() {
       {
         onSuccess: () => router.push('/'),
         onError: (ctx) => {
-          setError(ctx.error.message || 'Sign in failed');
+          setError(ctx.error.message || shellCopy.login.genericError);
           setLoading(false);
         },
       },
@@ -43,12 +44,12 @@ export default function LoginPage() {
       <Paper variant="outlined" sx={{ p: 4, width: '100%', maxWidth: 360 }}>
         <Stack spacing={3} component="form" onSubmit={onSubmit}>
           <Box>
-            <Typography variant="overline" color="text.secondary">Marn</Typography>
-            <Typography variant="h5">Staff sign in</Typography>
+            <Typography variant="overline" color="text.secondary">{shellCopy.login.brand}</Typography>
+            <Typography variant="h5">{shellCopy.login.heading}</Typography>
           </Box>
           {error && <Alert severity="error">{error}</Alert>}
           <TextField
-            label="Email"
+            label={shellCopy.login.email}
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
@@ -56,7 +57,7 @@ export default function LoginPage() {
             required
           />
           <TextField
-            label="Password"
+            label={shellCopy.login.password}
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
@@ -64,7 +65,7 @@ export default function LoginPage() {
             required
           />
           <Button type="submit" variant="contained" size="large" disabled={loading}>
-            {loading ? 'Signing in…' : 'Sign in'}
+            {loading ? shellCopy.login.submitting : shellCopy.login.submit}
           </Button>
         </Stack>
       </Paper>

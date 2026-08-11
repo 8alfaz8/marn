@@ -14,6 +14,71 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-11 — Coach and studio manager console UIs (made autonomously — flagging for review)
+
+Built by two parallel background passes consuming the already-reviewed
+data layer, then spot-checked and independently rebuilt/verified
+(`tsc`, `next build`) rather than trusted at face value. Both landed
+clean. The real judgment calls, for review:
+
+**Coach console (`components/coach/*`)**
+1. **Contact/payment fields are stripped field-by-field at the page**, not
+   trusted to already be absent — `app/coach/page.tsx` maps each booking
+   and member row to an explicit narrow shape before it reaches the
+   client, even though the underlying actions already scope by role.
+   Belt-and-braces on top of `docs/adr/0008`'s server-side enforcement.
+2. **No flag indicator on the schedule/roster rows** — only
+   `getMemberContext(memberId)` returns flags, and fanning out a context
+   call per row just to show a marker wasn't worth it. Shows
+   "Awaiting readiness screening" instead (data that *is* available at
+   list level). Closing this properly needs a flagged-member-id list
+   added to an existing read action — a small follow-up, not done here
+   to avoid touching the data layer mid-UI-build.
+3. **Refresh is stale-while-revalidate**: saving never unmounts the
+   capture forms, a 4px `LinearProgress` shows in reserved space instead.
+   Protects in-progress typing from `router.refresh()` — the same
+   "known trap" `CLAUDE.md` already documents, applied to a save-refresh
+   cycle instead of a poll.
+4. **Modality list is a small hand-picked constant**, not sourced from a
+   table (no `modalities` reference table exists). Revisit when
+   Administration makes services/modalities editable.
+
+**Studio manager console (`components/studio/*`)**
+1. **Didn't call `getManagerScheduleToday()`** — `getManagerDashboard()`
+   already returns today's bookings alongside the counts, so a second
+   identical query would only add a round-trip. That result comes back
+   unordered (unlike the dedicated action, which orders by time), so the
+   floor panel sorts client-side for display.
+2. **Price and duration are always derived from `lib/reference.ts`'s
+   `SERVICES`**, never a free-text field — the manual booking path can't
+   drift from the price list by typo.
+3. **No PAR-Q/readiness column on the member roster**, even though the
+   data is available — readiness is health-adjacent and stays the coach
+   console's territory; this surface shows roster/contact/booking facts
+   only.
+4. **`success` colour, initially used for a "completed" booking status
+   chip, was corrected to neutral** after review — `theme/theme.ts`
+   documents `success` as reserved for *measured positive change*, and a
+   routine completed-booking state isn't a proof point. Fixed in
+   `components/studio/primitives.tsx` rather than left as filed feedback.
+
+**Cross-cutting, fixed after both landed**
+- **User-facing strings weren't centralised anywhere at root** before
+  this pass — `components/StaffChrome.tsx` and `app/login/page.tsx`
+  (both written earlier this session) used inline literals, which is a
+  `CLAUDE.md` Iron Rule violation ("no hardcoded user-facing strings in
+  components... Arabic must be a configuration flip"). The coach console
+  agent caught this and built its own `components/coach/copy.ts`
+  correctly; the studio console agent caught the same issue but matched
+  the bad precedent instead of fixing it, reasonably reading "match
+  existing convention" as safer than inventing a third pattern
+  mid-build. Fixed the root cause instead: added `lib/copy.ts`
+  (`shellCopy`) for the shared login/chrome strings and rewired both
+  files to use it. **Still open:** `components/studio/*`'s ~900 lines
+  of inline strings were not extracted in this pass — a mechanical but
+  sizeable follow-up, tracked in `docs/architecture/overview.md` rather
+  than rushed at the end of this session.
+
 ## 2026-08-11 — Data layer decisions for the coach/studio-manager slice (made autonomously — flagging for review)
 
 The user asked me to keep building through the rest of Phase 1 without

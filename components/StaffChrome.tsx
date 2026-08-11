@@ -8,6 +8,7 @@ import Chip from '@mui/material/Chip';
 import Button from '@mui/material/Button';
 import { useRouter } from 'next/navigation';
 import { signOut } from '@/lib/auth-client';
+import { shellCopy } from '@/lib/copy';
 
 /* Shared shell for both staff consoles. Module-scope on purpose (CLAUDE.md's
    "known trap": an inline sub-component here would remount on every parent
@@ -37,16 +38,11 @@ export default function StaffChrome({
           <Typography variant="h6" component="span" sx={{ fontFamily: 'var(--font-petrona), serif' }}>
             Marn
           </Typography>
-          <Chip
-            size="small"
-            label={role === 'studio_manager' ? 'Studio manager' : 'Coach'}
-            color="primary"
-            variant="outlined"
-          />
+          <Chip size="small" label={shellCopy.chrome.roleLabel[role]} color="primary" variant="outlined" />
           <Typography variant="body2" color="text.secondary">{title}</Typography>
           <Box sx={{ flexGrow: 1 }} />
           <Typography variant="body2" color="text.secondary">{staffName}</Typography>
-          <Button size="small" onClick={onSignOut}>Sign out</Button>
+          <Button size="small" onClick={onSignOut}>{shellCopy.chrome.signOut}</Button>
         </Toolbar>
       </AppBar>
       <Box sx={{ p: { xs: 2, sm: 3 } }}>{children}</Box>
