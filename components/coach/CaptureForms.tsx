@@ -18,8 +18,22 @@ import { MUSCLES, PARQ_QUESTIONS, serviceById } from '@/lib/reference';
 import { createManualAssessment } from '@/lib/actions/assessments';
 import { logSession } from '@/lib/actions/sessions';
 import { submitParqScreening } from '@/lib/actions/parq';
+import { prescribeProgram } from '@/lib/actions/programs';
 import { copy } from './copy';
 import type { ScheduleBooking } from './types';
+
+/** One fixed template, matching the existing single-template precedent for
+ *  session-programme prescription elsewhere in this codebase (a full
+ *  move-library editor is out of scope this pass) — blueprint §4.1.6 names
+ *  "descriptions, target durations and video," this covers the first two. */
+const PROGRAM_TEMPLATE = {
+  title: 'Desk Reset — daily mobility',
+  moves: [
+    { name: 'Hip flexor stretch', description: 'Kneeling lunge stretch, both sides.', targetMins: 3 },
+    { name: 'Thoracic rotation', description: 'Seated or standing, both directions.', targetMins: 3 },
+    { name: 'Neck and shoulder release', description: 'Slow rolls and side stretches.', targetMins: 2 },
+  ],
+};
 
 /* Both forms are module-scope components with their own state, rendered
    inline (never in a blocking Dialog) — CLAUDE.md: "a measurement goes in
@@ -161,6 +175,51 @@ export function ParqScreeningForm({ memberId, onSaved }: { memberId: string; onS
       <Box>
         <Button type="submit" variant="contained" disabled={status === 'saving'}>
           {status === 'saving' ? copy.parq.saving : copy.parq.save}
+        </Button>
+      </Box>
+    </Stack>
+  );
+}
+
+export function PrescribeProgramForm({ memberId, onSaved }: { memberId: string; onSaved: () => void }) {
+  const [status, setStatus] = useState<'idle' | 'saving'>('idle');
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  const onPrescribe = async () => {
+    setError(null);
+    setSaved(false);
+    setStatus('saving');
+    try {
+      await prescribeProgram({ memberId, title: PROGRAM_TEMPLATE.title, moves: PROGRAM_TEMPLATE.moves });
+      setSaved(true);
+      onSaved();
+    } catch {
+      setError(copy.program.failed);
+    } finally {
+      setStatus('idle');
+    }
+  };
+
+  return (
+    <Stack spacing={2}>
+      <Box>
+        <Typography variant="h6">{copy.program.heading}</Typography>
+        <Typography variant="body2" color="text.secondary">{copy.program.hint}</Typography>
+      </Box>
+      {error && <Alert severity="error">{error}</Alert>}
+      {saved && <Alert severity="success">{copy.program.saved}</Alert>}
+      <Stack spacing={1}>
+        <Typography variant="subtitle2">{PROGRAM_TEMPLATE.title}</Typography>
+        {PROGRAM_TEMPLATE.moves.map((m) => (
+          <Typography key={m.name} variant="body2" color="text.secondary">
+            {m.name} — {m.description} ({m.targetMins} min)
+          </Typography>
+        ))}
+      </Stack>
+      <Box>
+        <Button variant="contained" disabled={status === 'saving'} onClick={onPrescribe}>
+          {status === 'saving' ? copy.program.prescribing : copy.program.prescribe}
         </Button>
       </Box>
     </Stack>

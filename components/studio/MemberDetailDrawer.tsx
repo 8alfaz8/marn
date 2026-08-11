@@ -16,9 +16,12 @@ import TableCell from '@mui/material/TableCell';
 import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import Typography from '@mui/material/Typography';
+import MenuItem from '@mui/material/MenuItem';
+import TextField from '@mui/material/TextField';
 import { getMemberBookingHistory } from '@/lib/actions/bookings';
 import { getMemberContext } from '@/lib/actions/members';
 import { getActiveMemberAccessToken, generateMemberAccessLink, revokeMemberAccessLink } from '@/lib/actions/memberAccess';
+import { getMemberCreditBalance, purchasePackage } from '@/lib/actions/creditLedger';
 import { MUSCLES, serviceById } from '@/lib/reference';
 import { copy } from './copy';
 import { BookingStatusChip, formatDay, formatNumber } from './primitives';
@@ -207,6 +210,77 @@ function MemberAccessSection({ memberId }: { memberId: string }) {
   );
 }
 
+const PACKAGES = [
+  { credits: 1, aed: 100, label: '1 credit — AED 100' },
+  { credits: 5, aed: 450, label: '5 credits — AED 450' },
+  { credits: 10, aed: 850, label: '10 credits — AED 850' },
+];
+
+/** Module scope, per CLAUDE.md's known trap. Payment is collected outside
+ *  the system (docs/adr/0015) — this records the sale, it doesn't take a
+ *  card. */
+function CreditsSection({ memberId }: { memberId: string }) {
+  const [balance, setBalance] = useState<number | null>(null);
+  const [packageIndex, setPackageIndex] = useState(1);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    setBalance(null);
+    void getMemberCreditBalance(memberId).then(setBalance);
+  }, [memberId]);
+
+  const refreshBalance = () => {
+    void getMemberCreditBalance(memberId).then(setBalance);
+  };
+
+  const onSell = async () => {
+    setError(null);
+    setMessage(null);
+    setBusy(true);
+    try {
+      const pkg = PACKAGES[packageIndex];
+      await purchasePackage({ memberId, credits: pkg.credits, amountAed: pkg.aed });
+      setMessage(copy.credits.sold);
+      refreshBalance();
+    } catch {
+      setError(copy.credits.failed);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Stack spacing={1.5}>
+      <SectionHeading>{copy.credits.heading}</SectionHeading>
+      <Typography variant="body2">
+        {balance === null ? copy.credits.loading : copy.credits.balance(balance)}
+      </Typography>
+      {error && <Alert severity="error">{error}</Alert>}
+      {message && <Alert severity="success">{message}</Alert>}
+      <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
+        <TextField
+          select
+          size="small"
+          value={packageIndex}
+          onChange={(e) => setPackageIndex(Number(e.target.value))}
+          sx={{ minWidth: 220 }}
+        >
+          {PACKAGES.map((p, i) => (
+            <MenuItem key={p.credits} value={i}>
+              {p.label}
+            </MenuItem>
+          ))}
+        </TextField>
+        <Button size="small" variant="outlined" disabled={busy} onClick={onSell}>
+          {copy.credits.sell}
+        </Button>
+      </Stack>
+    </Stack>
+  );
+}
+
 function BookingsSection({ bookings }: { bookings: MemberBookingHistory }) {
   return (
     <Stack spacing={1.5}>
@@ -308,6 +382,8 @@ export default function MemberDetailDrawer({ member, onClose }: { member: Member
               context &&
               bookings && (
                 <Stack spacing={3}>
+                  <Divider />
+                  <CreditsSection memberId={member.id} />
                   <Divider />
                   <MemberAccessSection memberId={member.id} />
                   <Divider />

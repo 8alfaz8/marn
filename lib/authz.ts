@@ -1,5 +1,5 @@
 import { cookies, headers } from 'next/headers';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, desc } from 'drizzle-orm';
 import { auth } from './auth';
 import { db, schema } from '@/db';
 
@@ -172,8 +172,19 @@ export async function requireStudioManagerOrSuperadmin(): Promise<
  * browser-driven verification (`docs/decisions.md`, 2026-08-11). An
  * unscreened member has no session/measurement/flag history yet to protect
  * from a coach who isn't "theirs," so this narrowly reopens exactly the gap
- * that's blocking, nothing more — once cleared, the ordinary
- * booking/session tie applies again.
+ * that's blocking, nothing more.
+ *
+ * **The coach who just cleared a member keeps access through the rest of
+ * that first visit**, even though clearing flips `parqCleared` to `true`
+ * and no booking/session exists yet — otherwise a coach loses their own
+ * member mid-panel the instant they finish the screening, before they can
+ * record a measurement, prescribe a programme, or log the session that
+ * first visit is actually for. A second bug found via browser-driven
+ * verification (`docs/decisions.md`, 2026-08-12), same root cause as the
+ * first: "cleared" and "has an ordinary booking/session tie yet" are not
+ * the same moment. Scoped to whoever performed the *most recent*
+ * screening — once someone else's booking/session naturally takes over,
+ * this stops mattering.
  */
 export async function assertMemberInScope(session: StaffSession, memberId: string) {
   const [member] = await db.select().from(schema.members).where(eq(schema.members.id, memberId)).limit(1);
@@ -196,6 +207,14 @@ export async function assertMemberInScope(session: StaffSession, memberId: strin
     .where(and(eq(schema.sessions.memberId, memberId), eq(schema.sessions.coachId, session.staffId)))
     .limit(1);
   if (sessionRow) return member;
+
+  const [latestScreening] = await db
+    .select({ staffId: schema.parqScreenings.staffId })
+    .from(schema.parqScreenings)
+    .where(eq(schema.parqScreenings.memberId, memberId))
+    .orderBy(desc(schema.parqScreenings.createdAt))
+    .limit(1);
+  if (latestScreening?.staffId === session.staffId) return member;
 
   throw new ForbiddenError('Member not assigned to you');
 }

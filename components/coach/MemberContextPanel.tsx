@@ -16,7 +16,7 @@ import Typography from '@mui/material/Typography';
 import { MUSCLES } from '@/lib/reference';
 import { clearFlag, raiseFlag } from '@/lib/actions/flags';
 import { copy } from './copy';
-import { MeasurementCapture, ParqScreeningForm, SessionLogForm } from './CaptureForms';
+import { MeasurementCapture, ParqScreeningForm, PrescribeProgramForm, SessionLogForm } from './CaptureForms';
 import type { MemberContext, ScheduleBooking } from './types';
 
 /* Everything a coach needs before and during the session, on one surface.
@@ -256,6 +256,29 @@ function CheckinsSection({ checkins }: { checkins: MemberContext['checkins'] }) 
   );
 }
 
+function ProgramSection({ program }: { program: MemberContext['program'] }) {
+  const recentCount = program
+    ? program.completions.filter((iso) => {
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - 28);
+        return new Date(iso) >= cutoff;
+      }).length
+    : 0;
+  return (
+    <Stack spacing={1}>
+      <SectionHeading>{copy.program.currentHeading}</SectionHeading>
+      {!program ? (
+        <Typography variant="body2" color="text.secondary">{copy.program.currentEmpty}</Typography>
+      ) : (
+        <>
+          <Typography variant="body2">{program.title}</Typography>
+          <Typography variant="body2" color="text.secondary">{copy.program.completions(recentCount)}</Typography>
+        </>
+      )}
+    </Stack>
+  );
+}
+
 function SessionsSection({ sessions }: { sessions: MemberContext['sessions'] }) {
   return (
     <Stack spacing={1.5}>
@@ -305,8 +328,8 @@ export default function MemberContextPanel({
   loading: boolean;
   onChanged: () => void;
 }) {
-  const [open, setOpen] = useState<'measure' | 'log' | 'parq' | null>(null);
-  const toggle = (which: 'measure' | 'log' | 'parq') => setOpen((cur) => (cur === which ? null : which));
+  const [open, setOpen] = useState<'measure' | 'log' | 'parq' | 'program' | null>(null);
+  const toggle = (which: 'measure' | 'log' | 'parq' | 'program') => setOpen((cur) => (cur === which ? null : which));
 
   return (
     <Stack spacing={2}>
@@ -339,6 +362,9 @@ export default function MemberContextPanel({
             <Button variant={open === 'log' ? 'contained' : 'outlined'} onClick={() => toggle('log')}>
               {open === 'log' ? copy.member.close : copy.member.logSession}
             </Button>
+            <Button variant={open === 'program' ? 'contained' : 'outlined'} onClick={() => toggle('program')}>
+              {open === 'program' ? copy.member.close : copy.member.prescribeProgram}
+            </Button>
           </Stack>
         </Stack>
 
@@ -368,6 +394,14 @@ export default function MemberContextPanel({
             onSaved={onChanged}
           />
         </Collapse>
+        <Collapse in={open === 'program'} unmountOnExit={false}>
+          <Divider sx={{ marginBlock: 2 }} />
+          <PrescribeProgramForm memberId={context.member.id} onSaved={onChanged} />
+        </Collapse>
+      </Paper>
+
+      <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 } }}>
+        <ProgramSection program={context.program} />
       </Paper>
 
       <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 } }}>

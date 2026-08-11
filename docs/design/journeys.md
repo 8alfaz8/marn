@@ -111,3 +111,94 @@ self-service (`docs/adr/0001` was a prototype-only exception):
    and fixing a real onboarding deadlock (a coach couldn't reach a
    first-time, unscreened member at all) that a build/type-check pass alone
    would never have surfaced.
+
+---
+
+## Root product — self-service booking (2026-08-12)
+
+Phase 2's exit criterion — "a member joins, books, ... with no staff
+intervention at any step" — is now real for the joining and booking part
+(payments and notifications are still Phase 2 items not yet built):
+
+1. A prospective member visits `/join` — no staff account, no invitation,
+   nothing pre-created for them. Name, phone, email, password, a studio
+   picker. **[built]**, true self-signup — replaces the "staff adds the
+   member" path from Phase 1 as a second way onto the roster, not the only
+   way.
+2. Lands signed in on `/member`, Overview tab: the same empty first-run
+   state a staff-added member sees at `/m/<token>` — "your scores start
+   after your first assessment." **[built]** — this is the exact same
+   presentational component (`components/member/MemberPortal.tsx`), fed by
+   a session instead of a link.
+3. Taps "Book" — sees "Awaiting readiness screening," not a form.
+   **[built]**. The safety gate from Phase 1 doesn't bend for self-service:
+   a coach still has to clear them in person before they can book anything.
+4. Once a coach clears them (unchanged flow from the readiness-screening
+   journey above), "Book" shows a real form: service, coach, date, then
+   the same shift-and-overlap-aware slot chips the studio manager's own
+   booking form uses. **[built]** — picks a coach+time, submits, sees
+   "Requested — a studio manager will confirm it shortly," not an
+   immediate confirmation (unlike a staff-created booking, which
+   auto-confirms since the staff member creating it is already the
+   approver).
+5. The booking shows in "My bookings" as "Awaiting confirmation" until a
+   studio manager approves it from the Floor tab (a new "Approve" button
+   next to the existing Reschedule/Reassign/Decline row actions), then
+   flips to "Confirmed." **[built]**. The member can cancel it themselves
+   at any point while it's still active — no fee, no notice-window
+   enforcement (that's the still-unbuilt "cancellation policy" blueprint
+   item; this is the bare-minimum walkable version).
+6. **Not yet built (as of this slice):** a booking now debits a real credit
+   ledger entry and a real `notifications` row is written — see the
+   completion pass below for both. Still not built anywhere: booking
+   anything that isn't coach-time (the resource model — compression boots,
+   oxygen chamber, sound room — remains deliberately deferred; see
+   `docs/architecture/overview.md`'s Phase 2 deviations).
+7. **Browser-verified**, step by step, via Playwright against throwaway
+   accounts, including the accepted cross-domain session edge case
+   (a staff session visiting `/member`, and vice versa, both correctly
+   redirect to that surface's own sign-in rather than leaking access) —
+   see `docs/decisions.md`'s 2026-08-12 entry.
+
+---
+
+## Root product — completing Phase 2 (2026-08-12): credits, programmes, check-in, cancellation, mobile
+
+1. A studio manager sells a member a package from the detail drawer
+   ("Sell package," a credits/AED picker) — payment is collected outside
+   the app (cash, card terminal) and just recorded. **[built]**. The
+   member's balance shows in the same drawer.
+2. A coach prescribes a home programme (one fixed template, matching the
+   existing single-template precedent for session programmes) from the
+   member context panel. **[built]**.
+3. The member's own `/member` "Programme" tab shows the moves and a "Mark
+   today complete" button, disabled once already done for the day.
+   **[built]** — completions now genuinely feed the Overview tab's
+   Consistency score and Recovery's adherence term, both previously
+   hardcoded placeholders.
+4. The member's "Check-in" tab — sleep, pain, a region chip list (not a
+   body diagram), an optional note. **[built]** — the coach's existing
+   "Recent check-ins" section (built in Phase 1, always empty until now)
+   shows it before the member arrives, exactly as the blueprint asks.
+5. The member books a session — it now debits a real credit ledger entry,
+   not just a revenue-proxy number. **[built]**. Cancelling shows, before
+   confirming, whether the credit will be refunded: 24h+ notice refunds
+   it, inside 24h forfeits it. **[built]** — the blueprint names
+   "cancellation policy" with zero concrete numbers; 24h is the number
+   this pass chose.
+6. Every booking/readiness/registration event writes a real
+   `notifications` row (still nothing actually sent — push and WhatsApp
+   both remain stubs behind a swappable interface, real vendor accounts
+   not available in this environment). **[built, recorded, not delivered]**.
+7. The same journey, on a real mobile client for the first time — sign in,
+   see scores, book, cancel, complete a programme, check in — via a new
+   Expo/React Native app mirroring the web member console exactly.
+   **[built]**, verified through `expo start --web` (no simulator/device
+   available in this environment, stated plainly rather than assumed away
+   — `docs/adr/0017`).
+8. **Two real bugs this pass's verification caught, not guessed at:** a
+   browser-only cookie-handling bug in the mobile app's API client (fixed
+   with a platform branch), and a second instance of the exact bug shape
+   Phase 1 found — clearing a member's PAR-Q locked their own coach out of
+   the panel they were still using, before any booking existed to restore
+   access. Both fixed and covered in `docs/decisions.md`'s 2026-08-12 entry.

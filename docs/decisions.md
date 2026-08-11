@@ -14,6 +14,130 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-12 — Completing Phase 2: credit ledger, programmes, check-in, notifications, cancellation policy, mobile app
+
+**Change:** everything remaining in blueprint Phase 2 except the full
+resource model (deliberately deferred, see `docs/architecture/overview.md`):
+credit ledger + a swappable payment interface (`docs/adr/0016`,
+`docs/adr/0015`), home programmes with a real `consistencyScore()` and real
+`adherence` (`lib/actions/programs.ts`, `lib/scoring.ts`), pre-session
+check-in (`lib/actions/checkins.ts`), a swappable notification interface
+wired into six trigger points (`docs/adr/0015`), a 24h cancellation policy,
+and a real React Native/Expo mobile app (`mobile/`, `docs/adr/0017`) with a
+new `app/api/mobile/*` REST layer and better-auth's bearer + expo plugins.
+
+**Verified, fully browser-driven**, both trees: web via Playwright against
+throwaway staff/member accounts (created and deleted for the check); the
+mobile app via `expo start --web` (Metro bundling clean, then the same
+Playwright approach against the react-native-web target) — the honest
+verification-constraint documented in `docs/adr/0017` (no simulator/device
+in this environment) held, but every screen and data flow that *can* run
+in a browser was exercised for real, not assumed. Full loop, both trees:
+self-registration → PAR-Q clear → programme prescribed → package sold (5
+credits) → self-booked (consumption entry) → approved → cancelled ≥24h out
+(refund entry, balance restored) → a second booking cancelled <24h out (no
+refund entry, forfeited) → check-in submitted and visible on the coach
+console before the member arrives → programme marked complete
+(consistency data flowing) → six `notifications` rows confirmed, each with
+zero health-data content in `payload`.
+
+**Two real bugs found and fixed by this verification, not by inspection:**
+
+1. **Mobile, cross-platform:** `lib/api.ts` set a `Cookie` request header by
+   hand for every `app/api/mobile/*` call. Browsers refuse to let script
+   set that header at all — it throws synchronously before the request is
+   even sent, silently swallowed by the calling screen's `.catch()`, so
+   nothing looked wrong until a raw in-page `fetch()` was used to isolate
+   it. Native `fetch` has no such restriction (why better-auth's Expo
+   pattern manages the cookie by hand in the first place), so this was
+   real everywhere web renders but invisible on the intended native
+   target — a genuine platform divergence, not a portability nicety. Fixed
+   with a `Platform.OS` branch: `credentials: 'include'` (browser's own
+   cookie jar) on web, the manual header on native. Needed matching CORS
+   additions (`middleware.ts`, new — scoped to `/api/mobile/*` and
+   `/api/auth/*` only) and `trustedOrigins` entries for the Expo dev
+   origin, both purely a `expo start --web` verification-path need, not
+   something the native app or the web member console requires.
+2. **Web, authorization:** the exact same class of bug Phase 1's
+   verification caught (`docs/decisions.md`, 2026-08-11), triggered a
+   second time by new code. `assertMemberInScope`/`getCoachMembers`
+   (`lib/authz.ts`, `lib/actions/members.ts`) widen coach access to an
+   *unscreened* member, but the instant a coach clears PAR-Q, that member
+   flips out of "unscreened" with no booking/session yet to replace it —
+   the coach lost their own member mid-panel, unable to prescribe a
+   programme or log the session the visit was for. Fixed by also granting
+   access to whoever performed the member's *most recent* PAR-Q screening,
+   until an ordinary booking/session tie naturally takes over. Two bugs of
+   the identical shape in two passes is itself worth noting: "cleared" and
+   "has an ordinary tie yet" are not the same moment, and every future
+   change to the readiness-screening boundary should check both directions
+   of that gap, not just the first one found.
+
+**Cadence-proxy judgment call:** `consistencyScore()` needs a "times per
+week" cadence the blueprint's `programs` schema has no field for —
+`moves.length` is used as that proxy (`lib/scores.ts`). Reasonable, not
+exact; revisit if programmes ever get a real prescribed-cadence field.
+
+`npx tsc --noEmit`, `npm run build` (both trees), `scripts/test-creditLedger.ts`
+(blueprint's three named cases: double-spend, expiry at a boundary, refund
+after consumption), and `scripts/test-scoring.ts`'s new `consistencyScore`
+cases all pass.
+
+## 2026-08-12 — Phase 2, slice 1: member auth + self-service booking
+
+**Change:** self-registration (`app/join`, `lib/actions/memberAuth.ts`),
+member sign-in (`app/member/login`), and self-service booking on the
+existing coach+service model (`lib/actions/bookings.ts`'s
+`createSelfBooking`/`getMemberAvailability`/`getActiveCoachesAtSite`/
+`getMemberOwnBookings`/`cancelSelfBooking`, plus the new `approveBooking`
+sibling to `declineBooking`). Full plan and reasoning in the approved plan
+this session worked from; `docs/adr/0014-member-auth-shared-better-auth-instance.md`
+covers the auth-architecture decision specifically.
+
+**Why signup is two steps, client then server:** `auth.api.signUpEmail`
+called from a server action has no request/response cycle to attach a
+session cookie to — it would create the user but leave the browser signed
+out. `app/join/page.tsx` calls `authClient.signUp.email(...)` directly
+(client-side, same as `app/login/page.tsx`'s existing `signIn.email` call)
+so the browser gets the cookie the normal way, then
+`completeMemberRegistration` (server action) reads that now-live session
+to do the domain-specific part: insert the `members` row. Same split
+exists implicitly in every other better-auth flow in this codebase; this
+is the first one where it had to be reasoned through explicitly because
+the two steps live in different files.
+
+**Why self-bookings land as `requested`, not auto-confirmed:** followed
+existing precedent already written into `createBooking`'s doc comment
+(added when that function was built) rather than deciding fresh — a
+studio-manager-created booking auto-confirms because the creator *is* the
+approver; a member booking for themselves is not, so it needs the
+`approveBooking` action this pass finally builds.
+
+**Verified, fully browser-driven** (Playwright, isolated scratch install,
+not added to the product's `package.json`; throwaway site/manager/coach/
+member created and deleted for this): self-signup at `/join` correctly
+required an explicit site pick (multiple real sites exist from earlier
+phases, so the single-site auto-select branch didn't fire — confirms that
+branch is reachable but wasn't exercised this pass); landed on `/member`
+signed in, "Book" tab showed the readiness-pending gate; signed in as
+coach, the self-registered member appeared in the roster via Phase 1's
+unscreened-member-scoping widening (confirms that fix still holds under a
+second, independent scenario); cleared PAR-Q; signed in as member, booked
+a coach+time — landed as "Requested," matching `createBooking`'s
+precedent; signed in as studio manager, the booking appeared on the Floor
+tab as `requested` with a working "Approve" action; back as the member,
+"My bookings" showed it "Confirmed"; cancelled it, confirmed
+`cancelled` in the live database (not just the UI, which showed a
+stale card for a moment — same screenshot-timing artifact noted in the
+2026-08-11 entry, not a real bug, confirmed by direct DB read). Also
+verified the accepted cross-domain edge case from
+`docs/adr/0014`: a staff session visiting `/member` redirects to
+`/member/login`, and a member session visiting `/coach` redirects to
+`/login` — both correctly treated as signed-out for the other surface,
+not a crash or a privilege leak.
+
+`npx tsc --noEmit` and `npm run build` both clean throughout.
+
 ## 2026-08-11 — Closing out Phase 1 at root: readiness screening, scoring, member portal
 
 **Change:** built the three Phase 1 items root was still missing —

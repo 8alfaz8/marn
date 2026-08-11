@@ -17,13 +17,13 @@ import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
-import { createBooking, declineBooking, getDaySchedule, reassignCoach, rescheduleBooking } from '@/lib/actions/bookings';
+import { approveBooking, createBooking, declineBooking, getCoachDayAvailability, getDaySchedule, reassignCoach, rescheduleBooking } from '@/lib/actions/bookings';
 import { SERVICES, serviceById } from '@/lib/reference';
 import { bookingRange, minutesToTime } from '@/lib/scheduling';
 import { copy } from './copy';
 import DayTimeline from './DayTimeline';
 import { BookingStatusChip, EmptyState, SectionCard, formatDay, formatNumber, useFormSubmit } from './primitives';
-import TimeSlotPicker from './TimeSlotPicker';
+import TimeSlotPicker from '../shared/TimeSlotPicker';
 import type { Booking, DaySchedule, Member, StaffMember } from './types';
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
@@ -83,6 +83,10 @@ function RescheduleAction({
             value={time}
             onChange={setTime}
             excludeBookingId={booking.id}
+            fetchSlots={getCoachDayAvailability}
+            pickCoachFirstLabel={copy.booking.pickCoachFirst}
+            loadingLabel={copy.booking.loadingSlots}
+            noSlotsLabel={copy.booking.noSlots}
           />
           <Button
             variant="contained"
@@ -291,6 +295,16 @@ export default function FloorPanel({
                                         }
                                       />
                                     )}
+                                    {booking.status === 'requested' && (
+                                      <Button
+                                        size="small"
+                                        variant="contained"
+                                        disabled={pending}
+                                        onClick={() => run(copy.floor.approved, () => approveBooking(booking.id), refreshDay)}
+                                      >
+                                        {copy.floor.approve}
+                                      </Button>
+                                    )}
                                     <Button
                                       size="small"
                                       disabled={pending}
@@ -393,7 +407,17 @@ export default function FloorPanel({
                   <Typography variant="body2" sx={{ mb: 1 }}>
                     {copy.booking.time}
                   </Typography>
-                  <TimeSlotPicker coachId={coachId} serviceId={serviceId} date={date} value={time} onChange={setTime} />
+                  <TimeSlotPicker
+                    coachId={coachId}
+                    serviceId={serviceId}
+                    date={date}
+                    value={time}
+                    onChange={setTime}
+                    fetchSlots={getCoachDayAvailability}
+                    pickCoachFirstLabel={copy.booking.pickCoachFirst}
+                    loadingLabel={copy.booking.loadingSlots}
+                    noSlotsLabel={copy.booking.noSlots}
+                  />
                 </Box>
                 {service && (
                   <Typography variant="body2" sx={{ color: 'text.secondary' }}>

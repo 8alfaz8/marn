@@ -4,9 +4,23 @@ import { randomUUID } from 'crypto';
 import { eq, and, or, desc } from 'drizzle-orm';
 import { db, schema } from '@/db';
 import { assertMemberInScope, requireStaff, requireStudioManager } from '@/lib/authz';
+import { requireMember } from '@/lib/memberAuth';
 import { logAudit } from '@/lib/audit';
 import { STUDIO_HOURS, serviceById } from '@/lib/reference';
 import { bookingRange, computeBusyRanges, computeFreeSlots, minutesToTime, rangesOverlap } from '@/lib/scheduling';
+import { notifyRecorded } from '@/lib/integrations/notifications';
+
+/** Cancellation policy (docs/decisions.md, 2026-08-12): 24h notice for a
+ *  full credit refund; inside that window (or a no-show), the consumed
+ *  credit is forfeited. No fee beyond the credit itself — the blueprint
+ *  names "cancellation policy" as a P2 item with no concrete numbers of
+ *  its own, this is the number chosen. */
+const CANCELLATION_NOTICE_HOURS = 24;
+
+function hoursUntil(date: string, time: string): number {
+  const target = new Date(`${date}T${time}:00`);
+  return (target.getTime() - Date.now()) / (1000 * 60 * 60);
+}
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -92,12 +106,13 @@ export async function getDaySchedule(date: string) {
   return { bookings, shifts };
 }
 
-/** Backs the slot-chip time picker: which start times for `serviceId` are
- *  actually free for `coachId` on `date`, respecting their assigned shifts,
- *  studio hours, and existing bookings (lib/scheduling.ts). `excludeBookingId`
- *  lets a booking's own current slot stay selectable while rescheduling it. */
-export async function getCoachDayAvailability(coachId: string, date: string, serviceId: string, excludeBookingId?: string) {
-  const session = await requireStudioManager();
+/** Shared query core behind `getCoachDayAvailability` (staff) and
+ *  `getMemberAvailability` (member self-booking) — same shift/booking read,
+ *  same `computeFreeSlots` math, different callers with different
+ *  authorization gates around them. Keeping this in one place is what
+ *  guarantees a member can only ever pick a slot the write path would also
+ *  accept, same guarantee `TimeSlotPicker` already relies on for staff. */
+async function computeCoachAvailability(coachId: string, date: string, serviceId: string, siteId: string, excludeBookingId?: string) {
   const service = serviceById(serviceId);
   if (!service) throw new Error('Unknown service.');
 
@@ -105,14 +120,41 @@ export async function getCoachDayAvailability(coachId: string, date: string, ser
     db
       .select({ startTime: schema.shifts.startTime, endTime: schema.shifts.endTime })
       .from(schema.shifts)
-      .where(and(eq(schema.shifts.staffId, coachId), eq(schema.shifts.date, date), eq(schema.shifts.siteId, session.siteId))),
+      .where(and(eq(schema.shifts.staffId, coachId), eq(schema.shifts.date, date), eq(schema.shifts.siteId, siteId))),
     db
       .select({ id: schema.bookings.id, serviceId: schema.bookings.serviceId, time: schema.bookings.time, status: schema.bookings.status })
       .from(schema.bookings)
-      .where(and(eq(schema.bookings.coachId, coachId), eq(schema.bookings.date, date), eq(schema.bookings.siteId, session.siteId))),
+      .where(and(eq(schema.bookings.coachId, coachId), eq(schema.bookings.date, date), eq(schema.bookings.siteId, siteId))),
   ]);
 
   return computeFreeSlots({ shifts, bookings, serviceMins: service.mins, excludeBookingId });
+}
+
+/** Backs the slot-chip time picker: which start times for `serviceId` are
+ *  actually free for `coachId` on `date`, respecting their assigned shifts,
+ *  studio hours, and existing bookings (lib/scheduling.ts). `excludeBookingId`
+ *  lets a booking's own current slot stay selectable while rescheduling it. */
+export async function getCoachDayAvailability(coachId: string, date: string, serviceId: string, excludeBookingId?: string) {
+  const session = await requireStudioManager();
+  return computeCoachAvailability(coachId, date, serviceId, session.siteId, excludeBookingId);
+}
+
+/** Member-facing counterpart — always the member's own site, never a
+ *  client-supplied one. */
+export async function getMemberAvailability(coachId: string, date: string, serviceId: string) {
+  const session = await requireMember();
+  return computeCoachAvailability(coachId, date, serviceId, session.siteId);
+}
+
+/** Active coaches at the member's own site — id/name only, no contact or
+ *  internal fields, for the self-booking coach picker. */
+export async function getActiveCoachesAtSite() {
+  const session = await requireMember();
+  return db
+    .select({ id: schema.staff.id, name: schema.staff.name })
+    .from(schema.staff)
+    .where(and(eq(schema.staff.siteId, session.siteId), eq(schema.staff.role, 'coach'), eq(schema.staff.active, true)))
+    .orderBy(schema.staff.name);
 }
 
 /**
@@ -161,13 +203,172 @@ export async function createBooking(input: {
   return id;
 }
 
-export async function declineBooking(bookingId: string) {
+/**
+ * Member self-booking (blueprint Phase 2). Lands as `requested`, not
+ * `confirmed` — per the note on `createBooking` above, a caller booking on
+ * someone else's behalf (a studio manager, already the approver) can
+ * auto-confirm; a member booking for themselves cannot skip approval.
+ * `approveBooking` (below) is that not-yet-built sibling to
+ * `declineBooking`, now built. `aed` is always derived from the price
+ * list, never client-supplied — same rule as everywhere else money touches
+ * a form in this codebase.
+ */
+export async function createSelfBooking(input: { coachId: string; serviceId: string; date: string; time: string }) {
+  const session = await requireMember();
+  if (!session.parqCleared) {
+    throw new Error('You need a readiness screening with a coach before you can book — visit the studio to get started.');
+  }
+  const service = serviceById(input.serviceId);
+  if (!service) throw new Error('Unknown service.');
+
+  const id = `bkg_${randomUUID()}`;
+  await db.transaction(async (tx) => {
+    await assertNoOverlap(tx, { ...input, memberId: session.memberId });
+    await tx.insert(schema.bookings).values({
+      id,
+      memberId: session.memberId,
+      coachId: input.coachId,
+      siteId: session.siteId,
+      serviceId: input.serviceId,
+      date: input.date,
+      time: input.time,
+      aed: service.aed,
+      status: 'requested',
+    });
+    // Accounting, not a gate (docs/decisions.md, 2026-08-12) — this pass
+    // deliberately does not check balance first, so a zero-or-negative
+    // balance never blocks a booking. recordedByStaffId is null: no staff
+    // actor, same reasoning as the missing logAudit call below.
+    await tx.insert(schema.creditLedger).values({
+      memberId: session.memberId,
+      type: 'consumption',
+      credits: -1,
+      relatedBookingId: id,
+      note: `Booking ${id}`,
+    });
+  });
+  // No logAudit call here, deliberately: audit_log.actorStaffId is a
+  // non-null staff foreign key, and a member booking for themselves has no
+  // staff actor to attribute it to — same reasoning as registerMember's
+  // (lib/actions/memberAuth.ts). The booking row itself, `requested` with
+  // no approver until approveBooking runs, is the record.
+  await notifyRecorded({
+    memberId: session.memberId,
+    template: 'booking_requested',
+    channel: 'whatsapp',
+    payload: { bookingId: id, date: input.date, time: input.time, serviceId: input.serviceId },
+  });
+  return id;
+}
+
+/** `declineBooking`'s sibling — confirms a `requested` booking (self-booked
+ *  by a member, or any other requested-not-yet-approved row). Reuses the
+ *  same `booking_approved` audit action `createBooking` already writes. */
+export async function approveBooking(bookingId: string) {
   const session = await requireStudioManager();
+  const [booking] = await db.select().from(schema.bookings).where(and(eq(schema.bookings.id, bookingId), eq(schema.bookings.siteId, session.siteId))).limit(1);
   await db
     .update(schema.bookings)
-    .set({ status: 'declined', approvedByStaffId: session.staffId, approvedAt: new Date() })
+    .set({ status: 'confirmed', approvedByStaffId: session.staffId, approvedAt: new Date() })
     .where(and(eq(schema.bookings.id, bookingId), eq(schema.bookings.siteId, session.siteId)));
+  await logAudit(session.staffId, 'booking_approved', 'booking', bookingId);
+  if (booking) {
+    await notifyRecorded({
+      memberId: booking.memberId,
+      template: 'booking_confirmed',
+      channel: 'whatsapp',
+      payload: { bookingId, date: booking.date, time: booking.time, serviceId: booking.serviceId },
+    });
+  }
+}
+
+/** The signed-in member's own bookings, newest first — the "My bookings"
+ *  section of /member. No `assertMemberInScope` needed: a member can only
+ *  ever be their own session's memberId. */
+export async function getMemberOwnBookings() {
+  const session = await requireMember();
+  return db
+    .select()
+    .from(schema.bookings)
+    .where(eq(schema.bookings.memberId, session.memberId))
+    .orderBy(desc(schema.bookings.date), desc(schema.bookings.time));
+}
+
+/** 24h cancellation policy (docs/decisions.md, 2026-08-12): ≥24h notice
+ *  refunds the consumed credit; inside that window, it's forfeited — no
+ *  refund entry written. A member can only cancel their own booking, and
+ *  only while it's still active. */
+export async function cancelSelfBooking(bookingId: string) {
+  const session = await requireMember();
+  const [booking] = await db.select().from(schema.bookings).where(eq(schema.bookings.id, bookingId)).limit(1);
+  if (!booking || booking.memberId !== session.memberId) throw new Error('Booking not found.');
+  if (!ACTIVE_BOOKING.includes(booking.status as (typeof ACTIVE_BOOKING)[number])) {
+    throw new Error('Only a requested or confirmed booking can be cancelled.');
+  }
+
+  const refunded = hoursUntil(booking.date, booking.time) >= CANCELLATION_NOTICE_HOURS;
+  await db.transaction(async (tx) => {
+    await tx.update(schema.bookings).set({ status: 'cancelled' }).where(eq(schema.bookings.id, bookingId));
+    if (refunded) {
+      await tx.insert(schema.creditLedger).values({
+        memberId: session.memberId,
+        type: 'refund',
+        credits: 1,
+        relatedBookingId: bookingId,
+        note: `Cancelled ${CANCELLATION_NOTICE_HOURS}h+ before ${booking.date} ${booking.time}`,
+      });
+    }
+  });
+  await notifyRecorded({
+    memberId: session.memberId,
+    template: 'booking_cancelled',
+    channel: 'whatsapp',
+    payload: { bookingId, date: booking.date, time: booking.time, refunded },
+  });
+  return { refunded };
+}
+
+/** Declining a self-booking (which already wrote a `consumption` entry at
+ *  request time, unlike a staff-created booking, which never touches the
+ *  ledger) must refund it — the member did nothing wrong; the studio
+ *  said no. Refund is unconditional here, not subject to the 24h policy
+ *  above, which only applies to a member's own choice to cancel. */
+export async function declineBooking(bookingId: string) {
+  const session = await requireStudioManager();
+  const [booking] = await db.select().from(schema.bookings).where(and(eq(schema.bookings.id, bookingId), eq(schema.bookings.siteId, session.siteId))).limit(1);
+  await db.transaction(async (tx) => {
+    await tx
+      .update(schema.bookings)
+      .set({ status: 'declined', approvedByStaffId: session.staffId, approvedAt: new Date() })
+      .where(and(eq(schema.bookings.id, bookingId), eq(schema.bookings.siteId, session.siteId)));
+
+    if (booking) {
+      const [consumed] = await tx
+        .select({ id: schema.creditLedger.id })
+        .from(schema.creditLedger)
+        .where(and(eq(schema.creditLedger.relatedBookingId, bookingId), eq(schema.creditLedger.type, 'consumption')))
+        .limit(1);
+      if (consumed) {
+        await tx.insert(schema.creditLedger).values({
+          memberId: booking.memberId,
+          type: 'refund',
+          credits: 1,
+          relatedBookingId: bookingId,
+          note: `Declined by studio — ${bookingId}`,
+          recordedByStaffId: session.staffId,
+        });
+      }
+    }
+  });
   await logAudit(session.staffId, 'booking_declined', 'booking', bookingId);
+  if (booking) {
+    await notifyRecorded({
+      memberId: booking.memberId,
+      template: 'booking_declined',
+      channel: 'whatsapp',
+      payload: { bookingId, date: booking.date, time: booking.time },
+    });
+  }
 }
 
 /** Loads a booking scoped to the manager's site, rejecting one that's

@@ -6,6 +6,7 @@ import { db, schema } from '@/db';
 import { requireCoach, assertMemberInScope } from '@/lib/authz';
 import { logAudit } from '@/lib/audit';
 import { PARQ_QUESTIONS } from '@/lib/reference';
+import { notifyRecorded } from '@/lib/integrations/notifications';
 
 /**
  * Readiness screening (blueprint §4.1.10) — "completed with a coach", a
@@ -39,6 +40,15 @@ export async function submitParqScreening(memberId: string, answers: Record<stri
     .where(eq(schema.members.id, memberId));
 
   await logAudit(session.staffId, 'readiness_changed', 'member', memberId);
+  // Payload deliberately carries no PAR-Q answer content — the Iron Rule
+  // against health data in any log-adjacent surface applies to
+  // `notifications.payload` exactly as it does to audit_log.
+  await notifyRecorded({
+    memberId,
+    template: redFlag ? 'readiness_referred' : 'readiness_cleared',
+    channel: 'whatsapp',
+    payload: {},
+  });
   return { id, redFlag };
 }
 
