@@ -15,7 +15,19 @@ export const shellCopy = {
     genericError: 'Sign in failed',
   },
   chrome: {
-    roleLabel: { coach: 'Coach', studio_manager: 'Studio manager' } as Record<'coach' | 'studio_manager', string>,
+    roleLabel: { coach: 'Coach', studio_manager: 'Studio manager', superadmin: 'Superadmin' } as Record<
+      'coach' | 'studio_manager' | 'superadmin',
+      string
+    >,
     signOut: 'Sign out',
+  },
+  impersonation: {
+    label: 'View as',
+    self: 'Myself (superadmin)',
+    option: (name: string, role: string, site: string | null) => (site ? `${name} — ${role}, ${site}` : `${name} — ${role}`),
+    bannerPrefix: 'Viewing as',
+    bannerSuffix: 'Actions you take are recorded against this account.',
+    stop: 'Back to superadmin',
+    failed: 'Could not switch account. Try again.',
   },
 };

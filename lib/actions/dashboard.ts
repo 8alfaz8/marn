@@ -2,7 +2,7 @@
 
 import { eq, and, gte } from 'drizzle-orm';
 import { db, schema } from '@/db';
-import { requireStudioManager } from '@/lib/authz';
+import { requireStudioManager, requireSuperadmin } from '@/lib/authz';
 
 const daysAgo = (n: number) => new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
@@ -36,4 +36,50 @@ export async function getManagerDashboard() {
     activeCoachCount: coaches.length,
     todaySchedule: todayBookings,
   };
+}
+
+/**
+ * Same shape as getManagerDashboard, computed per site plus a platform
+ * total — three unscoped queries grouped in JS rather than one query per
+ * site, so this doesn't get slower as sites are added (docs/adr/0011).
+ */
+export async function getSuperadminDashboard() {
+  await requireSuperadmin();
+  const today = new Date().toISOString().slice(0, 10);
+  const weekStart = daysAgo(7);
+
+  const [allSites, todayBookings, weekBookings, activeStaff] = await Promise.all([
+    db.select().from(schema.sites).orderBy(schema.sites.name),
+    db.select().from(schema.bookings).where(eq(schema.bookings.date, today)),
+    db.select().from(schema.bookings).where(gte(schema.bookings.date, weekStart)),
+    db.select().from(schema.staff).where(eq(schema.staff.active, true)),
+  ]);
+
+  const perSite = allSites.map((site) => {
+    const completedThisWeek = weekBookings.filter((b) => b.siteId === site.id && b.status === 'completed');
+    const confirmedToday = todayBookings.filter(
+      (b) => b.siteId === site.id && (b.status === 'confirmed' || b.status === 'completed'),
+    );
+    const coaches = activeStaff.filter((s) => s.siteId === site.id && s.role === 'coach');
+    return {
+      siteId: site.id,
+      siteName: site.name,
+      sessionsToday: confirmedToday.length,
+      sessionsThisWeek: completedThisWeek.length,
+      revenue7d: completedThisWeek.reduce((sum, b) => sum + b.aed, 0),
+      activeCoachCount: coaches.length,
+    };
+  });
+
+  const totals = perSite.reduce(
+    (acc, s) => ({
+      sessionsToday: acc.sessionsToday + s.sessionsToday,
+      sessionsThisWeek: acc.sessionsThisWeek + s.sessionsThisWeek,
+      revenue7d: acc.revenue7d + s.revenue7d,
+      activeCoachCount: acc.activeCoachCount + s.activeCoachCount,
+    }),
+    { sessionsToday: 0, sessionsThisWeek: 0, revenue7d: 0, activeCoachCount: 0 },
+  );
+
+  return { perSite, totals };
 }

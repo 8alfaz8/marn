@@ -8,6 +8,20 @@
       "when": 1786400540756,
       "tag": "0000_loud_namorita",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1786461754822,
+      "tag": "0001_freezing_groot",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786469139598,
+      "tag": "0002_giant_beyonder",
+      "breakpoints": true
     }
   ]
 }

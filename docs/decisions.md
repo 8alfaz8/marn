@@ -14,6 +14,244 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-11 — Impersonation needs two session resolvers, not one
+
+**Change:** `lib/authz.ts` now exposes `getRealStaffSession()` (the signed-in
+human) alongside `getStaffSession()` (the identity the app behaves as).
+Full reasoning in `docs/adr/0012-superadmin-impersonation.md`.
+
+**Why this is the non-obvious part:** the natural first cut is to resolve
+impersonation inside the single existing `getStaffSession()` and be done.
+That breaks the exit path — while acting as a coach, the effective session
+reports `role: 'coach'`, so `requireSuperadmin()` on the "stop impersonating"
+action refuses, and the superadmin is stuck in the borrowed identity with no
+way back short of clearing cookies by hand. Everything governing
+impersonation therefore authorizes against the *real* session; everything
+else in the app keeps calling `getStaffSession()` with no change.
+
+**Trade-off accepted:** writes during impersonation are attributed to the
+borrowed identity in the domain tables — only `audit_log` records that the
+superadmin was behind it (via the new `staff_impersonated` action). The
+alternative, threading a "real actor" through every write path, would touch
+every action for a benefit an internal tool doesn't need yet. Written up in
+the ADR as an explicit reversal point rather than left implicit.
+
+**Verified:** browser-driven as `alfaz@marn.studio` — dropdown lists all five
+impersonable staff across both sites (superadmins correctly excluded);
+switching to a coach lands on `/coach` showing that coach's real scoped data
+(one assigned member, not the full roster) with the warning banner; `/studio`
+correctly bounces to `/coach` while acting as a coach, i.e. the borrowed role
+genuinely constrains access rather than just changing the header; "Back to
+superadmin" returns cleanly; switching to a studio manager lands on `/studio`
+with that site's data. Zero console errors throughout. One check initially
+read as a failure — the studio console's skeleton was still rendering when
+the screenshot fired — re-checked with a proper wait and it passed; the
+third instance of that same race in this build.
+
+## 2026-08-11 — Superadmin-created staff never includes the `superadmin` role itself
+
+**Change:** `createStaffAccountForSite()` (`lib/actions/staff.ts`, new)
+lets a superadmin create a coach or studio manager at any site — its `role`
+parameter is typed `'coach' | 'studio_manager'` only, not the full 3-value
+enum.
+
+**Why:** nothing in the request asked for superadmin-to-superadmin account
+creation, and ADR-0011 already decided that role is seeded only
+(`db/seed.ts`'s env-var-gated bootstrap), never created through app UI even
+by another superadmin — keeping that boundary meant a narrower parameter
+type here rather than a runtime check that could be forgotten later.
+
+**Verified:** browser-driven, full loop — as the test superadmin, created a
+second site ("Marn — JBR"), created a new studio-manager account
+(Nadia Rahman) assigned to it directly from the Studios & staff tab, then
+signed in as that new manager in a separate session: landed on `/studio`
+correctly, saw zero members/zero coaches (her site's real, empty state —
+not an error), and — the actual point of the scoping — could not see
+"Alfaz" or any other Business Bay member anywhere. Two of the three
+verification checks in this pass initially read as failures because the
+screenshot raced `router.refresh()`'s server round-trip; re-checked after
+a fresh page load and both had, in fact, succeeded — noting this because
+it's the second time in this build the same race produced a misleading
+first read (see the cash-ledger entry below), worth remembering for any
+future browser-driven check against this console.
+
+## 2026-08-11 — Cross-site reads group in JS over unscoped queries, not one query per site
+
+**Change:** `getSuperadminDashboard()` (`lib/actions/dashboard.ts`) and
+`getCoachWorkload()` (new, `lib/actions/coachWorkload.ts`) each run a small
+fixed number of unscoped (or optionally-filtered) queries, then `.filter()`/
+group the results in JS per site or per coach, rather than looping `sites`/
+`coaches` and issuing one query per row.
+
+**Why:** the loop-per-row shape is the obvious first draft but its query
+count scales with the number of sites/coaches; the grouped shape stays at
+3 queries total regardless. Worth deciding deliberately once rather than
+letting the first superadmin-facing query set the pattern for the rest.
+
+**Verified:** browser-driven — as the test superadmin, dashboard's platform
+totals and the "By studio" table render consistent numbers; coach workload
+table shows correct shift/booked hours and upcoming counts per coach;
+recorded a manual cash entry (AED 250, "Cash in", with a note) and — after
+allowing `router.refresh()` to actually complete, since the first check
+raced a still-rendering page — confirmed it appears in the ledger with the
+right total (AED 250) and the note preserved.
+
+## 2026-08-11 — `StaffSession` becomes a discriminated union, not a flat `siteId: string`
+
+**Change:** `lib/authz.ts`'s `StaffSession` is now three union members
+(`role: 'coach'`, `role: 'studio_manager'` each with `siteId: string`;
+`role: 'superadmin'` with `siteId: null`), not one flat type. `requireStudioManager()`/
+`requireCoach()`/`requireSuperadmin()` return `Extract<StaffSession, {role: ...}>`.
+
+**Why:** `staff.siteId` became nullable in the schema (Phase 1, ADR-0011)
+because superadmins aren't site-pinned — but every existing site-scoped
+action (bookings, shifts, members, staff, dashboard) was written assuming
+`session.siteId` is always a plain `string`. A flat `siteId: string | null`
+type would have forced a null-check at every one of those ~15 existing call
+sites even though none of them can actually receive a superadmin session
+(they're all gated by `requireStudioManager`/`requireCoach`, which throw
+first). The discriminated union with `Extract<...>`-typed narrowing
+functions gives each gate a return type where `siteId` is exactly as
+non-null as it always was — zero changes needed at any existing call site,
+confirmed by `tsc --noEmit` passing with no edits to `lib/actions/*.ts`
+beyond what Phase 6 added on purpose.
+
+**Verified:** browser-driven — signed in as a new superadmin, landed on
+`/superadmin`; visiting `/studio` or `/coach` as that session redirects
+back to `/superadmin` (previously only `/coach`↔`/studio` exchanges
+existed); signed in as the existing test studio manager, confirmed they
+still land on `/studio` with zero regression, and visiting `/superadmin`
+bounces them to `/studio`.
+
+## 2026-08-11 — Member detail drawer reuses `getMemberContext`, doesn't duplicate it
+
+**Change:** `components/studio/MemberDetailDrawer.tsx` (new) calls the
+already-existing `getMemberContext()` (`lib/actions/members.ts`) for
+identity/checkins/sessions/measurements, and a new studio-manager-only
+`getMemberBookingHistory()` (`lib/actions/bookings.ts`) for the booking/
+charge history piece that function deliberately doesn't carry.
+
+**Why:** `getMemberContext` already branches its returned identity by role —
+full contact fields for `studio_manager`, name-only for `coach` — and a
+coach also calls it today from `components/coach/MemberContextPanel.tsx`.
+Writing a second, studio-only `getMemberDetail` action would have
+duplicated that query almost line for line. The one thing genuinely missing
+was booking/payment history, which ADR-0008 explicitly keeps off a coach's
+read path — so that part had to be a new, studio-manager-gated function,
+not an addition to the shared one (adding it there would've leaked payment
+data to coaches).
+
+**Verified:** browser-driven — opened the drawer for a seeded member with
+booking history across two dates; all three sections rendered correctly
+scoped (empty-state copy for the sections with no data yet, a populated
+booking/charge table with date/time/service/AED/status for the rest), no
+console errors.
+
+## 2026-08-11 — Floor view: a separate "viewing date" from the booking form's date
+
+**Change:** `components/studio/FloorPanel.tsx` now holds two independent
+date states — `viewDate` (drives the table + `DayTimeline`, defaults today)
+and `date` (the new-booking form's own field, unchanged). `getDaySchedule(date)`
+(new action, `lib/actions/bookings.ts`) replaces the old `getManagerScheduleToday`-
+only table data, fetched client-side on `viewDate` change.
+
+**Why:** the request was explicit — "floor view should... have some visual
+representation of free slots... on that day or any day the studio manager
+selects." Coupling the viewed date to the booking-in-progress date would mean
+switching days to check availability resets whatever the manager was mid-
+typing into the booking form; kept them independent instead.
+
+**Trade-off accepted:** every write action (create/decline/reschedule/
+reassign) now explicitly calls `refreshDay()` in its success callback rather
+than relying solely on `router.refresh()` — the server-rendered `schedule`
+prop (today only) wouldn't reflect a change on a non-today viewed date
+anyway. One more thing to remember when adding a new write action here.
+
+**Verified:** browser-driven — rescheduled a booking from 08:00 to 10:30 via
+the new row action, table and timeline both updated immediately without a
+page reload; attempted to reassign a different booking onto a coach who
+already had an overlapping booking that date and got the same "This coach
+already has a booking at that time." rejection as booking creation — the
+shared `assertNoOverlap` guarantee holds across all three write paths, not
+just the one it was first written for. Caught and fixed one bug in this
+pass: `DayTimeline`'s own heading duplicated the `SectionCard` wrapper's
+title — moved `DayTimeline`'s heading/subtitle up into the `SectionCard`
+props instead of rendering both.
+
+## 2026-08-11 — Shift-boundedness is enforced in the slot picker, not (yet) in `assertNoOverlap`
+
+**Change:** `components/studio/TimeSlotPicker.tsx` + `getCoachDayAvailability`
+only ever offer times inside the coach's assigned shift for that date. The
+write path (`assertNoOverlap` in `lib/actions/bookings.ts`) still only checks
+studio hours + existing-booking overlap — it does **not** independently
+verify the chosen time falls inside a shift.
+
+**Why flagging this and not just fixing it:** the manual-entry form is now
+built so a manager physically cannot pick an out-of-shift time through the
+picker (verified: chips for 18:00+ render disabled once a coach's shift
+ends at 18:00). Server-side shift enforcement would be defense-in-depth
+against a hand-crafted request bypassing the UI, not a gap a manager can hit
+through the console. Scoped out of this pass to keep `assertNoOverlap`
+focused on the one guarantee it was asked to make (no double-booking);
+tracked here rather than silently decided — revisit if this console ever
+gets a non-staff caller.
+
+**Verified:** browser-driven — assigned Sara Haddad a 08:00–18:00 shift for
+a test date, then confirmed the picker for that coach/date renders 08:00
+enabled, 09:00/09:30 disabled (overlaps a pre-existing 09:00–10:00 booking
+from the Phase 2 check), and 18:00 onward disabled (outside the shift);
+booking the enabled 08:00 slot succeeded end to end with zero console
+errors.
+
+## 2026-08-11 — Booking overlap check runs inside the write transaction, not before it
+
+**Change:** `lib/actions/bookings.ts`'s `createBooking`, new `rescheduleBooking`,
+new `reassignCoach` all open `db.transaction()`, read same-day bookings for
+the target coach/member, then insert/update inside the same transaction.
+
+**Why:** A check-then-insert done as two separate statements has a race
+window — two managers submitting the same slot within milliseconds of each
+other could both pass the check before either insert lands. Wrapping both
+in one transaction was the fork already resolved with the user
+(AskUserQuestion, this session) over a Postgres exclusion constraint —
+staying app-level and plain-Postgres per `CLAUDE.md`.
+
+**Verified:** browser-driven (Playwright, headless Chromium — no
+`chromium-cli` on this Windows box, so a one-off script instead) against
+the running dev server signed in as a test studio manager: booking coach A
+for 09:00–10:00, then attempting coach A again at 09:30 produced the exact
+UI error "This coach already has a booking at that time." with **zero**
+row inserted (confirmed by direct query — only the first booking exists for
+that date); a different coach at the same 09:30 was accepted normally.
+
+## 2026-08-11 — Superadmin role, cash ledger, nullable `staff.siteId`
+
+**Change:** `db/schema.ts` — `staffRole` enum gains `superadmin`; `staff.siteId`
+drops `notNull`; new `cash_ledger` table; `audit_action` enum gains
+`booking_rescheduled`, `booking_reassigned`, `site_created`,
+`staff_site_assigned`, `cash_entry_recorded`. Full reasoning in
+`docs/adr/0011-superadmin-role-and-cash-ledger.md` — not duplicated here.
+
+## 2026-08-11 — Scheduling math as one pure module, tested without adding a test runner
+
+**Change:** New `lib/scheduling.ts` (`computeFreeSlots`, `rangesOverlap`,
+etc. — no DB access) backs the booking overlap check, the slot-chip picker,
+the day timeline, and coach workload views alike, so "is this coach free"
+has exactly one implementation instead of four ad hoc ones drifting apart.
+
+**Why:** The alternative was letting each of those four features compute
+availability inline, which is how the existing `createBooking` ended up
+with zero overlap protection in the first place — nothing forced the logic
+to be written once.
+
+**Trade-off accepted:** Verified with `scripts/test-scheduling.ts`, run via
+`npx tsx` with plain `assert`-style checks, rather than pulling in vitest/
+jest. No test framework exists anywhere in this tree yet (`CLAUDE.md`'s repo
+map confirms it); adding one is a bigger call than this change needs, and
+`tsx`-run scripts are already the repo's pattern for non-Next entry points
+(`db/seed.ts`). Revisit once enough of these scripts exist to want shared
+fixtures/a runner.
+
 ## 2026-08-11 — Trust all `marn-*.vercel.app` origins temporarily, until a real domain exists
 
 **Change:** `lib/auth.ts` gained `trustedOrigins: ['https://marn-*.vercel.app']`.

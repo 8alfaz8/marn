@@ -35,3 +35,7 @@ export const SERVICES: Service[] = [
 ];
 
 export const serviceById = (id: string) => SERVICES.find((s) => s.id === id);
+
+/* Studio operating hours — every site, no per-site override yet. Bounds
+   both the booking slot picker and server-side booking validation. */
+export const STUDIO_HOURS = { openMinute: 8 * 60, closeMinute: 22 * 60 };

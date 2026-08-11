@@ -37,24 +37,63 @@ point of view until it's rebuilt there against real auth and a real schema.
 ## Root product status (real build, not the prototype)
 
 Started 2026-08-11: the first vertical slice at the repo root, staff-side
-only (coach console + a new studio manager console — `docs/adr/0008-studio-manager-role.md`),
-no member-facing UI yet. Code paths below are relative to the repo root, not
-`prototype/`. **Verified working end-to-end against a live database as of
-2026-08-11** — not just `tsc`/`build`: logged in as the seeded studio
+only (coach console, studio manager console, and — added later the same
+day — a superadmin console spanning every site: `docs/adr/0008-studio-manager-role.md`,
+`docs/adr/0011-superadmin-role-and-cash-ledger.md`), no member-facing UI
+yet. Code paths below are relative to the repo root, not `prototype/`.
+**Verified working end-to-end against a live database, browser-driven, at
+every stage** — not just `tsc`/`build`: logged in as the seeded studio
 manager, created a member and a coach account through the real UI, signed
-in as that coach, both consoles render correctly with zero console errors.
-Database is Neon, temporarily — `docs/adr/0010-neon-interim-production-database.md`.
+in as that coach (both consoles render correctly with zero console errors);
+separately, verified the booking-overlap guard, the shift-aware slot
+picker, the floor-view day timeline and reschedule/reassign actions, the
+member detail drawer, the superadmin console's cross-site dashboard and
+cash ledger, and a full create-site → create-manager → sign-in-as-that-
+manager → confirm-site-isolation loop — see `docs/decisions.md` entries
+dated 2026-08-11 for what each check actually exercised. Database is Neon,
+temporarily — `docs/adr/0010-neon-interim-production-database.md`.
 
 | Module | Code path | Status |
 |---|---|---|
-| Schema | `db/schema.ts`, `db/auth-schema.ts`, `drizzle.config.ts`, `drizzle/0000_loud_namorita.sql` | **done and pushed** — 15 tables live in the `marn-root` Neon project (`docs/adr/0007`, `docs/adr/0010`) |
-| Staff auth | `lib/auth.ts`, `app/api/auth/[...all]/route.ts`, `db/seed.ts`, `app/login/page.tsx`, `lib/auth-client.ts` | **done and verified live** — `better-auth` email+password, staff-only identity domain. `db/seed.ts` bootstrapped the first studio manager (`manager@marn.studio`); everyone else is created by an authenticated manager via `lib/actions/staff.ts`'s `createStaffAccount` (verified — used to create a real coach account through the UI) |
+| Schema | `db/schema.ts`, `db/auth-schema.ts`, `drizzle.config.ts`, `drizzle/0000_loud_namorita.sql`, `drizzle/0001_freezing_groot.sql`, `drizzle/0002_giant_beyonder.sql` | **done and pushed** — 16 tables live in the `marn-root` Neon project (`docs/adr/0007`, `docs/adr/0010`, `docs/adr/0011`, `docs/adr/0012`) |
+| Staff auth | `lib/auth.ts`, `app/api/auth/[...all]/route.ts`, `db/seed.ts`, `app/login/page.tsx`, `lib/auth-client.ts` | **done and verified live** — `better-auth` email+password, staff-only identity domain. `db/seed.ts` bootstrapped the first studio manager (`manager@marn.studio`) and optionally a superadmin (`SEED_SUPERADMIN_*` env vars, unset by default); everyone else is created by an authenticated manager (`lib/actions/staff.ts`'s `createStaffAccount`, site-locked) or superadmin (`createStaffAccountForSite`, any site, never role `superadmin`) |
 | Brand theme | `theme/theme.ts`, `app/layout.tsx` | **done, two real bugs fixed 2026-08-11** — `colorSchemeSelector` was set to the `'data'` shorthand (targets a boolean `[data-dark]` attribute) instead of the literal `'data-mui-color-scheme'` `InitColorSchemeScript` actually sets, and `ThemeProvider` was missing its own `defaultMode="dark"` prop (defaults to `'system'`, overwriting the script's attribute post-hydration). Both silently rendered light mode past `tsc`/`build` — only caught by an actual browser check. See `docs/decisions.md` |
-| Authorization layer | `lib/authz.ts` | **done** — `requireStaff`/`requireCoach`/`requireStudioManager` resolve the better-auth session to a `staff` row and gate by role; every server action/route handler calls these, never trusts a client-supplied id. `assertMemberInScope` is the single enforcement point for the coach-vs-manager data split |
+| Authorization layer | `lib/authz.ts` | **done** — `StaffSession` is a discriminated union on `role` (`coach`/`studio_manager` carry a non-null `siteId`, `superadmin` carries `null`); `requireStaff`/`requireCoach`/`requireStudioManager`/`requireSuperadmin`/`requireStudioManagerOrSuperadmin` resolve the better-auth session to a `staff` row and gate by role, each returning a type-narrowed session so existing site-scoped call sites needed no changes. `assertMemberInScope` is the single enforcement point for the coach/manager/superadmin data split; `roleHome(role)` maps a role to its console route. Two resolvers: `getRealStaffSession()` (signed-in human) and `getStaffSession()` (effective identity, impersonation applied) — `docs/adr/0012` |
+| Superadmin impersonation | `lib/actions/impersonation.ts`, `components/ImpersonationSwitcher.tsx`, `components/StaffChrome.tsx` | **done** — "View as" dropdown in the chrome switches the whole console to any active coach/studio manager. httpOnly `marn_act_as` cookie, re-verified against a live superadmin session on every request and worthless without one; only ever narrows access (superadmins aren't impersonable). Persistent banner + one-click exit; each switch audit-logged against the **real** superadmin (`staff_impersonated`). Writes during impersonation are attributed to the borrowed identity — see `docs/adr/0012` for that trade-off and its reversal point |
+| Scheduling math | `lib/scheduling.ts` | **done** — pure functions (`computeFreeSlots`, `rangesOverlap`, `bookingRange`, etc.), no DB access; single source of truth for coach availability, reused by the overlap check, the slot picker, the day timeline, and coach workload. Tested via `scripts/test-scheduling.ts` (plain `assert`-style, run with `npx tsx` — no test-runner dependency added) |
 | BodyMap adapter | `lib/integrations/bodymap/index.ts` | **done**, manual-entry only — `fromDeviceApi`/`fromExportFile` stubbed, matching the prototype's own precedent. Independently written, not a port (`docs/adr/0005`) |
-| Data / server actions layer | `lib/actions/{members,bookings,assessments,sessions,flags,shifts,staff,dashboard}.ts` | **done** for this slice — every action authorizes via `lib/authz.ts` first; see `docs/decisions.md` (2026-08-11) for the judgment calls made building it |
+| Data / server actions layer | `lib/actions/{members,bookings,assessments,sessions,flags,shifts,staff,dashboard,coachWorkload,cashLedger}.ts` | **done** for this slice — every action authorizes via `lib/authz.ts` first. `bookings.ts`'s `createBooking`/`rescheduleBooking`/`reassignCoach` share one transactional overlap guard (`assertNoOverlap`); see `docs/decisions.md` for the judgment calls made building all of it |
 | Coach console | `app/coach/page.tsx`, `components/coach/*` | **done** — read-only today's schedule, roster scoped to assigned members (no contact fields) with an open-flag indicator at list level (2026-08-11, product owner request), one consolidated member-context panel (check-ins/sessions/measurements/flags), inline (non-modal) measurement capture and session logging, flag raise/clear. Strings centralised in `components/coach/copy.ts` |
-| Studio manager console | `app/studio/page.tsx`, `components/studio/*` | **done** — dashboard stat tiles, today's floor activity, manual booking intake (price/duration derived from `lib/reference.ts`, never typed), staff roster + shift assignment + new staff account creation, member roster + contact info + new member creation. Strings centralised in `components/studio/copy.ts` (99 entries, extracted 2026-08-11 — the earlier gap is closed) |
+| Studio manager console | `app/studio/page.tsx`, `components/studio/*` | **done** — dashboard stat tiles, floor view for any date the manager picks (not just today) with end times and a per-coach day timeline (`DayTimeline.tsx`), manual booking intake through a shift-and-overlap-aware slot-chip picker (`TimeSlotPicker.tsx`, `getCoachDayAvailability`) rather than a raw time input, reschedule/reassign row actions sharing the same overlap guard as booking creation, staff roster + shift assignment + new staff account creation, member roster with a detail drawer (session history, measurements, booking/charge history — `MemberDetailDrawer.tsx`, reuses `getMemberContext` rather than duplicating it). Strings centralised in `components/studio/copy.ts` |
+| Superadmin console | `app/superadmin/page.tsx`, `components/superadmin/*` | **done** — cross-site dashboard (platform totals + per-site breakdown), coach workload (shift/booked hours next 7 days, sessions completed last 7 — shared action with the studio console's future use), cash ledger (booking revenue derived + manual entries, superadmin-recorded for now), studio creation, cross-site staff roster with reassign-to-site and create-staff-at-any-site. Strings centralised in `components/superadmin/copy.ts` |
+
+### Root product deviations (2026-08-11)
+
+Deliberately scoped out of this pass, not silently trimmed:
+
+- **Shift-boundedness is a picker-level guarantee, not a server-level one.**
+  `TimeSlotPicker`/`getCoachDayAvailability` only ever offer a coach's
+  assigned-shift times, but `assertNoOverlap` (the actual write-path guard
+  in `createBooking`/`rescheduleBooking`/`reassignCoach`) does not
+  independently re-check the shift — only studio hours and existing-booking
+  overlap. A manager cannot hit this gap through the console; a
+  hand-crafted request could. See `docs/decisions.md`.
+- **Cash-ledger manual entries are superadmin-only.** `recordCashEntry` is
+  `requireSuperadmin`-gated; a studio manager cannot record a walk-in
+  payment or refund at their own site without going through a superadmin.
+  Flagged as a likely next ask, not built ahead of it being asked for.
+- **`cash_ledger` is a manual-movement log, not a payments/POS system.**
+  Booking revenue still only ever derives from `bookings.aed` — there is no
+  real transaction processor, consistent with the "Booking and POS are ours"
+  Iron Rule (in-house when built, not built now). See `docs/adr/0011`.
+- **No studio-hours override per site.** `STUDIO_HOURS` (`lib/reference.ts`)
+  is one constant (8am–10pm) for every site — a second site with different
+  opening hours isn't representable yet.
+- **`getCoachWorkload`'s "last 7 days completed" only counts logged
+  `sessions` rows**, not completed bookings without a session logged against
+  them — matches the existing `sessions`/`bookings` split elsewhere in the
+  schema, not a new inconsistency, but worth knowing when the two numbers
+  don't visually reconcile.
 
 ## Deviations from the blueprint, by module
 
