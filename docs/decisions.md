@@ -14,6 +14,44 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-11 — Trust all `marn-*.vercel.app` origins temporarily, until a real domain exists
+
+**Change:** `lib/auth.ts` gained `trustedOrigins: ['https://marn-*.vercel.app']`.
+
+**Why:** The product owner hit `INVALID_ORIGIN` logging in from Vercel's
+per-deployment URL (`marn-eqytjdz2k-marn4.vercel.app`) — only the stable
+production alias (`marn-seven.vercel.app`) was trusted. No custom domain
+is purchased yet, so every Vercel-generated URL for this project needs
+to work for now; confirmed by the product owner directly rather than
+assumed. Sanity-checked the wildcard against better-auth's own matcher
+before shipping it: matches both real URL shapes, rejects an unrelated
+lookalike domain and a domain-suffix spoof
+(`marn-seven.vercel.app.evil.com`).
+
+**Trade-off accepted:** Any Vercel project anyone (not just this team)
+names starting with `marn-` would also pass this origin check — a real
+but narrow window, acceptable only because this is explicitly temporary.
+**Must be tightened to the real domain once one is purchased** — flagged
+in a code comment at the point of use, not just here.
+
+## 2026-08-11 — Ask before touching Vercel or Neon, every time
+
+**Change:** No code change — a standing process rule from the product
+owner, saved to memory for future sessions too.
+
+**Why:** Earlier in this same session, several Neon/Vercel actions
+(provisioning a database, rewriting env vars, triggering a production
+deploy) were taken under a broader "take logical decisions without
+asking" instruction that was meant for code/product decisions, not
+infrastructure with real external visibility and cost. The product
+owner drew a tighter boundary specifically around Vercel and Neon.
+
+**How to apply going forward:** stop and ask, with reasoning, before
+any Vercel or Neon action — not just once, every time. Explicit
+in-the-moment requests (like the password reset and origin fix right
+after this rule was stated) still count as asking; the rule is about
+not *initiating* infrastructure changes unprompted.
+
 ## 2026-08-11 — Provisioned a real Neon database and fixed two real dark-theme bugs, found by actually logging in
 
 **Change:** Created a new Neon project (`marn-root`), pushed the schema,

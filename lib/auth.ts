@@ -20,4 +20,10 @@ export const auth = betterAuth({
   database: drizzleAdapter(db, { provider: 'pg' }),
   emailAndPassword: { enabled: true },
   session: { expiresIn: 60 * 60 * 24 * 7 },
+  /* Temporary, per product owner (2026-08-11): no custom domain purchased
+     yet, so every Vercel URL for this project — the stable production
+     alias and each per-deployment URL alike — needs to pass better-auth's
+     origin check. Tighten this to the real domain only once one exists;
+     a wildcard this broad has no place in the final config. */
+  trustedOrigins: ['https://marn-*.vercel.app'],
 });
