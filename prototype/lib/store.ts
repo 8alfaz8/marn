@@ -6,7 +6,7 @@ import { useEffect, useState, useCallback } from 'react';
    round-trips that wrote the rows. */
 
 export type Call = {
-  id: string; who: 'MEMBER' | 'COACH' | 'ADMIN' | 'SYSTEM';
+  id: string; who: 'MEMBER' | 'COACH' | 'MANAGER' | 'ADMIN' | 'SYSTEM';
   verb: string; path: string; req: any; res: any;
   status: number; ms: number; at: Date; open?: boolean;
 };
@@ -51,12 +51,12 @@ export async function api(verb: string, path: string, body?: any, who: Call['who
 
 /** Whole-dataset snapshot, polled. Fine at demo scale; paginate for production.
  *
- * `scope` lets a caller that only needs one member's or one coach's data ask
- * the server to filter before sending, instead of shipping the whole
- * database on every poll and filtering client-side (which is what Member and
- * Coach both used to do). Admin and the Gate persona picker still need the
- * full unscoped snapshot and pass no scope. */
-export function useSnapshot(scope?: { kind: 'member' | 'coach'; id: string }, pollMs = 12000) {
+ * `scope` lets a caller that only needs one member's, one coach's or one
+ * manager's (site-wide) data ask the server to filter before sending,
+ * instead of shipping the whole database on every poll and filtering
+ * client-side (which is what Member and Coach both used to do). Admin still
+ * needs the full unscoped snapshot and passes no scope. */
+export function useSnapshot(scope?: { kind: 'member' | 'coach' | 'manager'; id: string }, pollMs = 12000) {
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const qs = scope ? `?scope=${scope.kind}&id=${encodeURIComponent(scope.id)}` : '';

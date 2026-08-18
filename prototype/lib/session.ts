@@ -11,7 +11,7 @@ import { cookies } from 'next/headers';
 
 export const SESSION_COOKIE = 'marn_who';
 
-export type Identity = { kind: 'member' | 'coach' | 'admin'; id: string };
+export type Identity = { kind: 'member' | 'coach' | 'manager' | 'admin'; id: string };
 
 export async function getIdentity(): Promise<Identity | null> {
   const store = await cookies();

@@ -29,8 +29,11 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import EventAvailableOutlinedIcon from '@mui/icons-material/EventAvailableOutlined';
 import ShowChartOutlinedIcon from '@mui/icons-material/ShowChartOutlined';
 import TodayOutlinedIcon from '@mui/icons-material/TodayOutlined';
+import Fade from '@mui/material/Fade';
 import Chrome from './Chrome';
 import ParqForm from './ParqForm';
+import { PremiumCard } from './premium';
+import { MemberBodySkeleton } from './skeletons';
 import CheckinForm from './CheckinForm';
 import { Gonio, BodyMap } from './Viz';
 import {
@@ -39,7 +42,7 @@ import {
 } from './MemberScreens';
 import { api, useSnapshot } from '@/lib/store';
 import {
-  MUSCLES, SERVICES, ADDONS, SITE,
+  MUSCLES, SERVICES, ADDONS, siteById,
   muscle, service, addon, colorOf, iso, addDays, todayIso,
 } from '@/lib/reference';
 
@@ -151,6 +154,7 @@ export default function Member({ memberId }: { memberId: string }) {
   const programs = s.programs.filter((p: any) => p.memberId === memberId);
   const myBookings = s.bookings.filter((b: any) => b.memberId === memberId && !['cancelled', 'completed'].includes(b.status));
   const coachName = (id: string | null) => s.coaches.find((c: any) => c.id === id)?.name || 'Coach to be assigned';
+  const siteName = siteById(me?.siteId)?.name || 'Studio';
 
   useEffect(() => {
     if (!bookPicker) return;
@@ -236,7 +240,7 @@ export default function Member({ memberId }: { memberId: string }) {
           onBack={() => setBodyOpen(false)}
         />
 
-        <Paper variant="outlined" sx={{ p: 2.5, borderRadius: (t) => t.marn.radius.lg }}>
+        <Paper variant="outlined" sx={{ p: 2.5, borderRadius: (t) => `${t.marn.radius.lg}px` }}>
           <Eyebrow>Whole-body map</Eyebrow>
           <Grid container spacing={1.5} sx={{ mt: 0.5 }}>
             <Grid size={6}>
@@ -375,12 +379,12 @@ export default function Member({ memberId }: { memberId: string }) {
 
   const renderBookingsList = () => (
     <Stack spacing={2}>
-      <PageTitle eyebrow={SITE.name} title="Book a session" onBack={() => setBookOpen(false)} />
+      <PageTitle eyebrow={siteName} title="Book a session" onBack={() => setBookOpen(false)} />
       {parqCallout()}
       {myBookings.length ? (
         <Stack spacing={1.5}>
           {[...myBookings].sort((a: any, b: any) => (a.date + a.time).localeCompare(b.date + b.time)).map((b: any) => (
-            <Paper key={b.id} variant="outlined" sx={{ p: 2.5 }}>
+            <PremiumCard key={b.id} sx={{ p: 2.5 }}>
               <Stack direction="row" spacing={1} sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
                 <Eyebrow>{fmtDate(b.date)} · {b.time}</Eyebrow>
                 <Chip size="small" label={b.status} color={statusChipColor(b.status)} />
@@ -396,7 +400,7 @@ export default function Member({ memberId }: { memberId: string }) {
               >
                 Cancel
               </Button>
-            </Paper>
+            </PremiumCard>
           ))}
         </Stack>
       ) : (
@@ -413,7 +417,7 @@ export default function Member({ memberId }: { memberId: string }) {
 
     return (
       <Stack spacing={2}>
-        <PageTitle eyebrow={SITE.name} title="Book a session" onBack={() => setBookPicker(false)} />
+        <PageTitle eyebrow={siteName} title="Book a session" onBack={() => setBookPicker(false)} />
 
         {parqCallout()}
 
@@ -551,7 +555,7 @@ export default function Member({ memberId }: { memberId: string }) {
 
   const body = () => {
     if (error) return <Alert severity="error">{error}</Alert>;
-    if (!snap) return <Typography variant="overline" sx={{ color: 'text.secondary' }}>Loading…</Typography>;
+    if (!snap) return <MemberBodySkeleton />;
     if (!me) return <Alert severity="error">We could not find that member account.</Alert>;
 
     if (bodyOpen) return renderBody();
@@ -580,13 +584,15 @@ export default function Member({ memberId }: { memberId: string }) {
   };
 
   return (
-    <Chrome current="member" label={me?.name ?? 'Member'} snap={snap ?? EMPTY_SNAP} refresh={refresh} msg={msg}>
+    <Chrome current="member" currentId={memberId} label={me?.name ?? 'Member'} snap={snap ?? EMPTY_SNAP} refresh={refresh} msg={msg}>
       <AmbientWash tab={tab}>
         <Container
           maxWidth="sm"
           sx={{ py: 3, paddingBlockEnd: (t) => `calc(${t.spacing(12)} + env(safe-area-inset-bottom))` }}
         >
-          {body()}
+          <Fade in key={`${tab}-${bodyOpen}-${homeOpen}-${bookOpen}-${bookPicker}-${sessionsView.view}`} timeout={220}>
+            <Box>{body()}</Box>
+          </Fade>
         </Container>
       </AmbientWash>
 

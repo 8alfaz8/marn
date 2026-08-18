@@ -11,6 +11,7 @@ import Typography from '@mui/material/Typography';
 import TextField from '@mui/material/TextField';
 import Button from '@mui/material/Button';
 import Chip from '@mui/material/Chip';
+import MenuItem from '@mui/material/MenuItem';
 import Table from '@mui/material/Table';
 import TableHead from '@mui/material/TableHead';
 import TableBody from '@mui/material/TableBody';
@@ -25,12 +26,16 @@ import FormControlLabel from '@mui/material/FormControlLabel';
 import CloseIcon from '@mui/icons-material/Close';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import ToggleButton from '@mui/material/ToggleButton';
+import Fade from '@mui/material/Fade';
 import { BarChart } from '@mui/x-charts/BarChart';
 import { useTheme } from '@mui/material/styles';
 import Chrome from './Chrome';
 import { Gonio } from './Viz';
+import { PremiumCard } from './premium';
+import { ConsoleSkeleton } from './skeletons';
+import MembersList from './MembersList';
 import { api, useSnapshot } from '@/lib/store';
-import { MUSCLES, MODALITIES, SITE, SERVICES, service, addon, colorOf, iso, addDays, todayIso } from '@/lib/reference';
+import { MUSCLES, MODALITIES, SITES, SERVICES, service, addon, iso, addDays, todayIso, scopeSnapshotForManager } from '@/lib/reference';
 
 const fmtDate = (d: string) => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 const blankSession = (mins = 30) => ({
@@ -71,8 +76,10 @@ export default function Admin() {
   const [view, setView] = useState<'overview' | 'roster' | 'members' | 'earnings'>('overview');
   const [overviewRange, setOverviewRange] = useState<RangeKey>('1m');
   const [earningsRange, setEarningsRange] = useState<RangeKey>('1m');
+  const [siteFilter, setSiteFilter] = useState<'all' | string>('all');
   const [open, setOpen] = useState<string | null>(null);
   const [newCoach, setNewCoach] = useState('');
+  const [newCoachSite, setNewCoachSite] = useState(SITES[0].id);
   const [rom, setRom] = useState<Record<string, number>>({});
   const [romKey, setRomKey] = useState<string | null>(null);
   const [sform, setSform] = useState(blankSession());
@@ -84,9 +91,11 @@ export default function Admin() {
   const measFor = (assessmentId: string | null) => snap?.measurements.filter((x: any) => x.assessmentId === assessmentId) ?? [];
   const utilisation = (date: string) => {
     if (!snap) return 0;
-    const mins = snap.bookings.filter((b: any) => b.date === date && b.status !== 'cancelled')
+    const bks = siteFilter === 'all' ? snap.bookings : snap.bookings.filter((b: any) => b.siteId === siteFilter);
+    const cs = siteFilter === 'all' ? snap.coaches : snap.coaches.filter((c: any) => c.siteId === siteFilter);
+    const mins = bks.filter((b: any) => b.date === date && b.status !== 'cancelled')
       .reduce((s: number, b: any) => s + service(b.serviceId).mins, 0);
-    return Math.round((mins / (12 * 60 * Math.max(snap.coaches.length, 1))) * 100);
+    return Math.round((mins / (12 * 60 * Math.max(cs.length, 1))) * 100);
   };
 
   const drawerMember = snap ? memberOf(open) : null;
@@ -110,10 +119,18 @@ export default function Admin() {
   }, [snap, open, drawerAssessmentId]);
 
   if (!snap) {
-    return <Container sx={{ py: 6 }}><Typography variant="overline">Loading…</Typography></Container>;
+    return <ConsoleSkeleton tabs={4} statCount={3} />;
   }
 
-  const coachOutcomes = (cutoff: string | null) => snap.coaches.map((c: any) => {
+  /* This is the one surface that legitimately sees every studio — the site
+     filter below narrows the view, it does not gate access (see the header
+     comment). 'all' passes the snapshot through unfiltered; picking a
+     studio reuses the same scoping helper the manager console applies
+     server-side, so "admin viewing site s2" and "s2's own manager" see
+     identically-shaped data. */
+  const scoped = siteFilter === 'all' ? snap : scopeSnapshotForManager(snap, siteFilter);
+
+  const coachOutcomes = (cutoff: string | null) => scoped.coaches.map((c: any) => {
     const ss = snap.sessions.filter((s: any) => s.coachId === c.id && (!cutoff || s.completedAt >= cutoff));
     return {
       ...c, sessions: ss.length,
@@ -132,15 +149,15 @@ export default function Admin() {
           <Box><Typography variant="overline" color="text.secondary">Utilisation today</Typography><Typography variant="readout" sx={{ fontSize: 22 }}>{utilisation(today)}%</Typography></Box>
           <Box><Typography variant="overline" color="text.secondary">Booked today</Typography>
             <Typography variant="readout" sx={{ fontSize: 22 }}>
-              AED {snap.bookings.filter((b: any) => b.date === today && b.status !== 'cancelled').reduce((s: number, b: any) => s + b.aed, 0)}
+              AED {scoped.bookings.filter((b: any) => b.date === today && b.status !== 'cancelled').reduce((s: number, b: any) => s + b.aed, 0)}
             </Typography></Box>
-          <Box><Typography variant="overline" color="text.secondary">Sessions logged</Typography><Typography variant="readout" sx={{ fontSize: 22 }}>{snap.sessions.length}</Typography></Box>
+          <Box><Typography variant="overline" color="text.secondary">Sessions logged</Typography><Typography variant="readout" sx={{ fontSize: 22 }}>{scoped.sessions.length}</Typography></Box>
         </Stack>
       </Stack>
 
       <Grid container spacing={3}>
         <Grid size={{ xs: 12, md: 6 }}>
-          <Paper variant="outlined" sx={{ p: 2.5 }}>
+          <PremiumCard sx={{ p: 2.5 }}>
             <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
               <Typography variant="overline" color="text.secondary">Coach outcomes</Typography>
               <ToggleButtonGroup size="small" exclusive value={overviewRange} onChange={(_, v) => v && setOverviewRange(v)}>
@@ -163,11 +180,11 @@ export default function Admin() {
             <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
               Average pain drop per session is the outcome metric worth managing, and the number that sells a corporate contract.
             </Typography>
-          </Paper>
+          </PremiumCard>
         </Grid>
 
         <Grid size={{ xs: 12, md: 6 }}>
-          <Paper variant="outlined" sx={{ p: 2.5 }}>
+          <PremiumCard sx={{ p: 2.5 }}>
             <Typography variant="overline" color="text.secondary">Capacity, next 7 days</Typography>
             <Stack spacing={1.5} sx={{ mt: 1.5 }}>
               {[...Array(7)].map((_, i) => {
@@ -183,7 +200,7 @@ export default function Admin() {
             <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
               Anything under 40% is a slot to push to nearby members at short notice.
             </Typography>
-          </Paper>
+          </PremiumCard>
         </Grid>
       </Grid>
     </Container>
@@ -191,7 +208,7 @@ export default function Admin() {
 
   const renderEarnings = () => {
     const cutoff = cutoffFor(earningsRange);
-    const inRange = snap.bookings.filter((b: any) => b.status !== 'cancelled' && (!cutoff || b.date >= cutoff));
+    const inRange = scoped.bookings.filter((b: any) => b.status !== 'cancelled' && (!cutoff || b.date >= cutoff));
     const total = inRange.reduce((s: number, b: any) => s + b.aed, 0);
 
     const byDay = new Map<string, number>();
@@ -217,7 +234,7 @@ export default function Admin() {
 
         <Grid container spacing={3}>
           <Grid size={{ xs: 12, md: 7 }}>
-            <Paper variant="outlined" sx={{ p: 2.5 }}>
+            <PremiumCard sx={{ p: 2.5 }}>
               <Typography variant="overline" color="text.secondary">Revenue by day</Typography>
               {days.length ? (
                 <BarChart
@@ -230,10 +247,10 @@ export default function Admin() {
               ) : (
                 <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>No booked revenue in this range.</Typography>
               )}
-            </Paper>
+            </PremiumCard>
           </Grid>
           <Grid size={{ xs: 12, md: 5 }}>
-            <Paper variant="outlined" sx={{ p: 2.5 }}>
+            <PremiumCard sx={{ p: 2.5 }}>
               <Typography variant="overline" color="text.secondary">By service</Typography>
               <Table size="small" sx={{ mt: 1 }}>
                 <TableHead><TableRow><TableCell>Service</TableCell><TableCell align="right">Bookings</TableCell><TableCell align="right">AED</TableCell></TableRow></TableHead>
@@ -247,7 +264,7 @@ export default function Admin() {
                   ))}
                 </TableBody>
               </Table>
-            </Paper>
+            </PremiumCard>
           </Grid>
         </Grid>
 
@@ -266,7 +283,7 @@ export default function Admin() {
       <Typography variant="h4" sx={{ mb: 2 }}>Roster</Typography>
       <Grid container spacing={3}>
         <Grid size={{ xs: 12, md: 7 }}>
-          <Paper variant="outlined" sx={{ p: 2.5 }}>
+          <PremiumCard sx={{ p: 2.5 }}>
             <Table size="small">
               <TableHead><TableRow><TableCell>Coach</TableCell><TableCell>Title</TableCell><TableCell align="right">Sessions</TableCell></TableRow></TableHead>
               <TableBody>
@@ -275,58 +292,39 @@ export default function Admin() {
                 ))}
               </TableBody>
             </Table>
-          </Paper>
+          </PremiumCard>
         </Grid>
         <Grid size={{ xs: 12, md: 5 }}>
-          <Paper variant="outlined" sx={{ p: 2.5 }}>
+          <PremiumCard sx={{ p: 2.5 }}>
             <Typography variant="overline" color="text.secondary">Add a coach</Typography>
             <Stack spacing={1.5} sx={{ mt: 1.5 }}>
               <TextField label="Full name" size="small" value={newCoach} onChange={(e) => setNewCoach(e.target.value)} />
+              <TextField select label="Studio" size="small" value={newCoachSite} onChange={(e) => setNewCoachSite(e.target.value)}>
+                {SITES.map((s) => <MenuItem key={s.id} value={s.id}>{s.name}</MenuItem>)}
+              </TextField>
               <Button variant="contained" disabled={!newCoach.trim()} onClick={() =>
-                act(api('POST', '/coaches', { name: newCoach }, 'ADMIN').then(() => setNewCoach('')), 'Coach added')}>
+                act(api('POST', '/coaches', { name: newCoach, siteId: newCoachSite }, 'ADMIN').then(() => setNewCoach('')), 'Coach added')}>
                 Add coach
               </Button>
             </Stack>
-          </Paper>
+          </PremiumCard>
         </Grid>
       </Grid>
     </Container>
   );
 
-  const renderMembers = () => {
-    const cell = (v: number) => <TableCell align="right"><Typography variant="body2" sx={{ fontWeight: 600, color: v ? colorOf(v / 100) : 'text.disabled' }}>{v || '—'}</Typography></TableCell>;
-    return (
-      <Container maxWidth="lg" sx={{ py: 3 }}>
-        <Stack direction="row" sx={{ mb: 2, justifyContent: 'space-between', alignItems: 'flex-end' }}>
-          <Box><Typography variant="overline" color="text.secondary">Roster</Typography><Typography variant="h4">Members</Typography></Box>
-          <Stack direction="row" spacing={3}>
-            <Box><Typography variant="overline" color="text.secondary">Active</Typography><Typography variant="readout" sx={{ fontSize: 22 }}>{snap.members.length}</Typography></Box>
-            <Box><Typography variant="overline" color="text.secondary">Credits outstanding</Typography><Typography variant="readout" sx={{ fontSize: 22 }}>{snap.members.reduce((s: number, m: any) => s + m.credits, 0)}</Typography></Box>
-          </Stack>
+  const renderMembers = () => (
+    <Container maxWidth="lg" sx={{ py: 3 }}>
+      <Stack direction="row" sx={{ mb: 2, justifyContent: 'space-between', alignItems: 'flex-end' }}>
+        <Box><Typography variant="overline" color="text.secondary">Roster</Typography><Typography variant="h4">Members</Typography></Box>
+        <Stack direction="row" spacing={3}>
+          <Box><Typography variant="overline" color="text.secondary">Active</Typography><Typography variant="readout" sx={{ fontSize: 22 }}>{scoped.members.length}</Typography></Box>
+          <Box><Typography variant="overline" color="text.secondary">Credits outstanding</Typography><Typography variant="readout" sx={{ fontSize: 22 }}>{scoped.members.reduce((s: number, m: any) => s + m.credits, 0)}</Typography></Box>
         </Stack>
-        <Paper variant="outlined" sx={{ overflowX: 'auto' }}>
-          <Table size="small">
-            <TableHead><TableRow><TableCell>Member</TableCell><TableCell align="right">Flex</TableCell><TableCell align="right">Mob</TableCell><TableCell align="right">Rec</TableCell><TableCell align="right">Sessions</TableCell><TableCell align="right">Credits</TableCell><TableCell>Last</TableCell><TableCell /></TableRow></TableHead>
-            <TableBody>
-              {snap.members.map((m: any) => (
-                <TableRow key={m.id} hover sx={{ cursor: 'pointer' }} onClick={() => setOpen(m.id)}>
-                  <TableCell>
-                    <Typography variant="body2" sx={{ fontWeight: 600 }}>{m.name} {m.flags.length ? <Chip size="small" color="error" label={m.flags.length} sx={{ ml: 1 }} /> : null}</Typography>
-                    <Typography variant="caption" color="text.secondary">{m.phone} · {m.persona}</Typography>
-                  </TableCell>
-                  {cell(m.scores.flexibility)}{cell(m.scores.mobility)}{cell(m.scores.recovery)}
-                  <TableCell align="right">{m.sessionCount}</TableCell>
-                  <TableCell align="right">{m.credits}</TableCell>
-                  <TableCell><Typography variant="caption" color="text.secondary">{m.lastSession || '—'}</Typography></TableCell>
-                  <TableCell align="right"><Button size="small" variant="outlined" onClick={(e) => { e.stopPropagation(); setOpen(m.id); }}>Open</Button></TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </Paper>
-      </Container>
-    );
-  };
+      </Stack>
+      <MembersList site={siteFilter} onOpen={setOpen} />
+    </Container>
+  );
 
   const renderDrawer = () => {
     const m = drawerMember;
@@ -467,22 +465,34 @@ export default function Admin() {
     );
   };
 
+  const siteLabel = siteFilter === 'all' ? 'All studios' : SITES.find((s) => s.id === siteFilter)?.name ?? siteFilter;
+
   return (
-    <Chrome current="admin" label={`${SITE.name} — admin`} snap={snap} refresh={refresh} msg={msg}>
+    <Chrome current="admin" currentId="admin" label={`${siteLabel} — admin`} snap={snap} refresh={refresh} msg={msg}>
       <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper' }}>
         <Container maxWidth="lg">
-          <Tabs value={view} onChange={(_, v) => setView(v)}>
-            <Tab label="Overview" value="overview" />
-            <Tab label="Roster" value="roster" />
-            <Tab label="Members" value="members" />
-            <Tab label="Earnings" value="earnings" />
-          </Tabs>
+          <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1, pt: 1.5 }}>
+            <Tabs value={view} onChange={(_, v) => setView(v)}>
+              <Tab label="Overview" value="overview" />
+              <Tab label="Roster" value="roster" />
+              <Tab label="Members" value="members" />
+              <Tab label="Earnings" value="earnings" />
+            </Tabs>
+            <ToggleButtonGroup size="small" exclusive value={siteFilter} onChange={(_, v) => v && setSiteFilter(v)} sx={{ mb: 1 }}>
+              <ToggleButton value="all">All studios</ToggleButton>
+              {SITES.map((s) => <ToggleButton key={s.id} value={s.id}>{s.name.replace('Marn — ', '')}</ToggleButton>)}
+            </ToggleButtonGroup>
+          </Stack>
         </Container>
       </Box>
-      {view === 'overview' && renderOverview()}
-      {view === 'roster' && renderRoster()}
-      {view === 'members' && renderMembers()}
-      {view === 'earnings' && renderEarnings()}
+      <Fade in key={view} timeout={220}>
+        <Box>
+          {view === 'overview' && renderOverview()}
+          {view === 'roster' && renderRoster()}
+          {view === 'members' && renderMembers()}
+          {view === 'earnings' && renderEarnings()}
+        </Box>
+      </Fade>
       {open && renderDrawer()}
     </Chrome>
   );

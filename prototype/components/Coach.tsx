@@ -25,11 +25,14 @@ import FormControlLabel from '@mui/material/FormControlLabel';
 import Slider from '@mui/material/Slider';
 import Drawer from '@mui/material/Drawer';
 import Alert from '@mui/material/Alert';
+import Fade from '@mui/material/Fade';
 import CloseIcon from '@mui/icons-material/Close';
 import Chrome from './Chrome';
 import { Gonio } from './Viz';
+import { PremiumCard } from './premium';
+import { ConsoleSkeleton } from './skeletons';
 import { api, useSnapshot } from '@/lib/store';
-import { MUSCLES, MODALITIES, SITE, service, addon, colorOf, scopeSnapshotForCoach, todayIso } from '@/lib/reference';
+import { MUSCLES, MODALITIES, siteById, service, addon, colorOf, scopeSnapshotForCoach, todayIso } from '@/lib/reference';
 
 /* NOTE ON STRUCTURE
    Every piece of form state lives in this component, not in the sub-views.
@@ -104,17 +107,20 @@ export default function Coach({ coachId }: { coachId: string }) {
   }, [open, drawerAssessmentId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!rawSnap || !snap) {
-    return (
-      <Container maxWidth="lg" sx={{ py: 6 }}>
-        {error
-          ? <Alert severity="error">{error}. The console reloads on its own once the API answers.</Alert>
-          : <Typography variant="overline" color="text.secondary">Loading the floor…</Typography>}
-      </Container>
-    );
+    if (error) {
+      return (
+        <Container maxWidth="lg" sx={{ py: 6 }}>
+          <Alert severity="error">{error}. The console reloads on its own once the API answers.</Alert>
+        </Container>
+      );
+    }
+    return <ConsoleSkeleton tabs={3} />;
   }
 
   const pending = snap.bookings.filter((b: any) => b.status === 'requested');
-  const coachName = rawSnap.coaches.find((c: any) => c.id === coachId)?.name || 'Coach';
+  const coachRow = rawSnap.coaches.find((c: any) => c.id === coachId);
+  const coachName = coachRow?.name || 'Coach';
+  const siteName = siteById(coachRow?.siteId)?.name || 'Studio';
 
   const act = async (p: Promise<any>, message: string, close = false) => {
     try { await p; toast(message); if (close) setOpen(null); refresh(); }
@@ -144,13 +150,13 @@ export default function Coach({ coachId }: { coachId: string }) {
   );
 
   const panel = (eyebrow: string, children: React.ReactNode, action?: React.ReactNode) => (
-    <Paper variant="outlined" sx={{ p: 3, height: '100%' }}>
+    <PremiumCard sx={{ p: 3, height: '100%' }}>
       <Stack direction="row" spacing={2} sx={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap' }}>
         <Typography variant="overline" color="text.secondary">{eyebrow}</Typography>
         {action}
       </Stack>
       <Box sx={{ mt: 2 }}>{children}</Box>
-    </Paper>
+    </PremiumCard>
   );
 
   /* ---------------- views ---------------- */
@@ -163,7 +169,7 @@ export default function Coach({ coachId }: { coachId: string }) {
     return (
       <>
         {head(
-          `${SITE.name} · ${new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}`,
+          `${siteName} · ${new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}`,
           'Your floor today',
           [
             { label: 'Booked', value: bks.length },
@@ -394,7 +400,7 @@ export default function Coach({ coachId }: { coachId: string }) {
           if (!m) return null;
           const mins = Math.max(1, Math.round((Date.now() - new Date(b.createdAt).getTime()) / 6e4));
           return (
-            <Paper key={b.id} variant="outlined" sx={{ p: 3 }}>
+            <PremiumCard key={b.id} sx={{ p: 3 }}>
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}
                      sx={{ justifyContent: 'space-between', alignItems: { sm: 'flex-start' } }}>
                 <Box>
@@ -419,12 +425,12 @@ export default function Coach({ coachId }: { coachId: string }) {
                   </Button>
                 </Stack>
               </Stack>
-            </Paper>
+            </PremiumCard>
           );
         }) : (
-          <Paper variant="outlined" sx={{ p: 3 }}>
+          <PremiumCard sx={{ p: 3 }}>
             <Typography variant="body2" color="text.secondary">Inbox clear. New booking requests land here.</Typography>
-          </Paper>
+          </PremiumCard>
         )}
       </Stack>
     </>
@@ -655,7 +661,7 @@ export default function Coach({ coachId }: { coachId: string }) {
     /* Chrome gets the unscoped snapshot on purpose: its segment switcher needs
        a member/coach id to open the other consoles with. Everything the coach
        console itself renders comes from the scoped `snap`. */
-    <Chrome current="coach" label={coachName} snap={rawSnap} refresh={refresh} msg={msg}>
+    <Chrome current="coach" currentId={coachId} label={coachName} snap={rawSnap} refresh={refresh} msg={msg}>
       <Container maxWidth="xl" sx={{ py: 3 }}>
         <Tabs value={view} onChange={(_, v) => setView(v)} variant="scrollable" allowScrollButtonsMobile
               sx={{ mb: 3, borderBottom: '1px solid', borderColor: 'divider' }}>
@@ -668,9 +674,13 @@ export default function Coach({ coachId }: { coachId: string }) {
           } />
         </Tabs>
 
-        {view === 'today' && renderToday()}
-        {view === 'members' && renderMembers()}
-        {view === 'requests' && renderRequests()}
+        <Fade in key={view} timeout={220}>
+          <Box>
+            {view === 'today' && renderToday()}
+            {view === 'members' && renderMembers()}
+            {view === 'requests' && renderRequests()}
+          </Box>
+        </Fade>
       </Container>
 
       {open && renderDrawer()}

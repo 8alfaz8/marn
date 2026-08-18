@@ -1,9 +1,13 @@
 # Marn — prototype
 
-Assisted stretching and recovery, tracked in degrees. One Next.js app serving two surfaces:
+Assisted stretching and recovery, tracked in degrees. One Next.js app serving four surfaces,
+across three studios:
 
 - **Member** — mobile-first web. Scores, body map, progress, booking, home programme.
-- **Coach console** — desktop and tablet. Floor schedule, roster, requests, assessment capture, session logging.
+- **Coach console** — desktop and tablet. Requests, assessment capture, session logging.
+- **Studio manager console** — desktop and tablet. Floor view, shift assignment, manual booking,
+  request approval, site roster.
+- **Platform admin** — cross-studio overview, site-filterable roster, earnings.
 
 Both read and write the same Postgres database. What a coach saves, a member sees on refresh.
 
@@ -26,7 +30,7 @@ Both read and write the same Postgres database. What a coach saves, a member see
 npm install
 cp .env.example .env          # paste your pooled DATABASE_URL
 npm run db:push               # create the tables
-npm run db:seed               # load the three personas
+npm run db:seed               # load three studios' worth of demo people ("Test User (###)")
 npm run dev                   # http://localhost:3000
 ```
 
@@ -55,23 +59,32 @@ Redeploys are automatic on every push to `main`.
 
 ## Walking the demo
 
-1. Open as **Layla Mansour** (power user). Look at Progress — ninety days of history, an early climb,
-   a plateau around month four, then a second climb. That shape is the pitch.
-2. Open as **Tom Whitfield**. Everything is empty and booking is blocked until his readiness screening
-   is done. Most people's day one looks like this.
-3. **Create an account** from the gate. You are now a real row in Postgres.
+Every seeded person is named `Test User (###)` — search the landing page's Autocomplete by number.
+Members split three ways per studio: 8 brand-new (empty state, PAR-Q outstanding), 32 "active"
+(weeks to months in, steady history), 10 "power" (longest tenure, wearable-linked, dense history).
+
+1. Sign in as a **User** (member) from a long-tenured number (higher numbers within a studio's 50
+   skew toward "power"). Look at Progress — a real flexibility-score trend line, since-you-joined or
+   twelve-week window depending on tenure.
+2. Sign in as one of the first few numbers at a studio instead — everything is empty and booking is
+   blocked until the PAR-Q is done. Most people's day one looks like this.
+3. **Create an account** from the gate, picking a studio. You are now a real row in Postgres.
 4. Book a session as any member.
-5. Switch to **Coach** → Requests → confirm it. Assign yourself.
-6. Coach → Members → open the member → **Import from BodyMap** → fill in the session form → **Log session**.
+5. Use the top-bar switcher to jump to a **Studio manager** at the same studio → Requests → assign a
+   coach → Confirm. Or Floor → book a walk-in directly, using the shift-aware time-slot picker.
+6. Switch to **Coach** → Members → open the member → **Import from BodyMap** → fill in the session
+   form → **Log session**.
 7. Switch back to the member. Scores moved, the body map recoloured, and the coach's summary is in Progress.
-8. **Settings → API activity** shows every request that did it. **Settings → Database rows** shows the rows.
+8. Sign in as **Platform admin** → toggle between "All studios" and one studio → the roster and stats
+   re-scope.
+9. **Settings → API activity** shows every request that did it. **Settings → Database rows** shows the rows.
 
 ---
 
 ## What's real and what isn't
 
 Real: Postgres persistence, the full API surface, scoring maths, PAR-Q gating, credit decrement,
-booking conflict detection, coach and member creation.
+booking conflict detection, shift-and-overlap-aware manual booking, coach/manager/member creation.
 
 Not real, deliberately:
 
@@ -96,17 +109,22 @@ of `DATABASE_URL` and a Dockerfile.
 ## Layout
 
 ```
-app/page.tsx              root: persona gate, role switch, settings
-app/api/[...path]/        the entire API surface, one dispatcher
+app/page.tsx              root: category/person gate, settings
+app/api/[...path]/        the entire API surface, one dispatcher (includes /directory)
+components/Gate.tsx       landing page: category toggle, site filter, search, admin entry
+components/Chrome.tsx     shared app bar: role switch + cross-studio person switcher
 components/Member.tsx     member surfaces
 components/Coach.tsx      coach console and member drawer
+components/Manager.tsx    studio manager console: floor, requests, staff, members
+components/DayTimeline.tsx, components/TimeSlotPicker.tsx   floor-view building blocks
 components/Viz.tsx        goniometer arc, area chart, body map
 components/Panels.tsx     API log and database browser
 db/schema.ts              canonical data model
-db/seed.ts                the three personas
+db/seed.ts                three studios' worth of demo people and their history
 lib/scoring.ts            composite scores — isolated, will be rewritten
+lib/scheduling.ts         shift/overlap math — pure, no DB, ported from the root product
 lib/adapters/bodymap.ts   anti-corruption layer for the device
-lib/reference.ts          muscles, services, prices
+lib/reference.ts          muscles, services, prices, studios
 ```
 
 ## Commands

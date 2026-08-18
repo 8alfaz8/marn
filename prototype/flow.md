@@ -29,23 +29,40 @@ Same as the root file:
 
 ---
 
-## Persona picker → identity cookie → route access
+## Category/person picker → identity cookie → route access
 
 **Entry point:** `GET /` (`prototype/app/page.tsx`)
 
 **Path:**
-1. `app/page.tsx` `GatePage()` (app/page.tsx:5-11) — calls `getIdentity()`; if a cookie already identifies a role, redirects straight to `/member`, `/coach`, or `/admin`; otherwise renders `<Gate />` →
-2. `lib/session.ts` `getIdentity()` (lib/session.ts:16-25) — reads the `marn_who` httpOnly cookie, JSON-parses `{kind, id}`, returns `null` if absent/malformed →
-3. `components/Gate.tsx` `Gate()` (components/Gate.tsx:29-161) — persona picker; on click of a persona card or "Open as staff" tile, calls `openAs()` →
-4. `components/Gate.tsx` `openAs()` (components/Gate.tsx:41-46) — `POST /api/session` with `{kind, id}`, then `router.push()` to the matching route →
-5. `app/api/session/route.ts` `POST()` (app/api/session/route.ts:6-14) — sets the `marn_who` cookie (httpOnly, 30-day maxAge) to `{kind, id}` — no validation that `id` is real or that the caller is entitled to it →
-6. `app/member/page.tsx` / `app/coach/page.tsx` / `app/admin/page.tsx` (each file, lines 5-9) — server component calls `getIdentity()` again on the new route; redirects to `/` if the cookie's `kind` doesn't match the route, otherwise renders `<Member memberId={who.id}>` / `<Coach coachId={who.id}>` / `<Admin />`.
+1. `app/page.tsx` `GatePage()` (app/page.tsx:5-11) — calls `getIdentity()`; if a cookie already identifies a role, redirects straight to `/member`, `/coach`, `/manager`, or `/admin`; otherwise renders `<Gate />` →
+2. `lib/session.ts` `getIdentity()` (lib/session.ts:16-25) — reads the `marn_who` httpOnly cookie, JSON-parses `{kind, id}` (`kind` now `member | coach | manager | admin`), returns `null` if absent/malformed →
+3. `components/Gate.tsx` `Gate()` — fetches `GET /api/directory` (id/name/siteId only, not the full snapshot — see the API dispatcher notes below) on mount; a `ToggleButtonGroup` picks the category (studio manager / coach / user), a site `ToggleButtonGroup` narrows the pool, and an MUI `Autocomplete` searches within it (by name, i.e. by number, since every demo person is `Test User (###)`). "Continue as …" calls `openAs()`. A separate "Platform admin" card calls `openAs('admin', 'admin')` directly, bypassing the category picker →
+4. `components/Gate.tsx` `openAs()` — `POST /api/session` with `{kind, id}`, then `router.push()` to the matching route (`/member`, `/coach`, `/manager`, or `/admin`) →
+5. `app/api/session/route.ts` `POST()` (app/api/session/route.ts:6-14) — sets the `marn_who` cookie (httpOnly, 30-day maxAge) to `{kind, id}` — no validation that `id` is real or that the caller is entitled to it (still not real authorization, see docs/adr/0002) →
+6. `app/member/page.tsx` / `app/coach/page.tsx` / `app/manager/page.tsx` / `app/admin/page.tsx` (each file, lines 5-9) — server component calls `getIdentity()` again on the new route; redirects to `/` if the cookie's `kind` doesn't match the route, otherwise renders `<Member memberId>` / `<Coach coachId>` / `<Manager managerId>` / `<Admin />`.
 
-Signup path branches at step 3: `Gate.tsx`'s `createMember()` (components/Gate.tsx:48-54) calls `POST /members` (see the assessment/session flows below for the general `api()`/dispatcher pattern) before calling `openAs('member', ...)` at step 4.
+Signup path branches at step 3: `Gate.tsx`'s `createMember()` calls `POST /members` with a chosen `siteId` (see the assessment/session flows below for the general `api()`/dispatcher pattern) before calling `openAs('member', ...)` at step 4.
 
-Sign-out / role switch: `components/Chrome.tsx` `switchAccount()` (components/Chrome.tsx:49-53) calls `DELETE /api/session` (app/api/session/route.ts:16-20, clears the cookie) then routes back to `/`. `switchTo()` (components/Chrome.tsx:39-47) does the same `POST /api/session` + route push as step 4/5 above, using the first member/coach id in the already-loaded snapshot.
+Sign-out / role switch / person switch: `components/Chrome.tsx` fetches its own `GET /api/directory` independently of the page's `snap` prop (a coach- or member-scoped snapshot doesn't carry every other studio's roster). `switchAccount()` calls `DELETE /api/session` then routes back to `/`. `switchRole()` (the Manager/Coach/Member/Admin `ToggleButtonGroup`) jumps to the first person of the target role at the current identity's own site (falling back to the pool's first entry, or straight to `admin` with no id lookup). The `TextField select` beside it — "the top-bar person switcher" — swaps to any person of the *current* role across *all three* sites (not site-restricted, unlike the role switch), using the same `openAs()`/`POST /api/session`/`router.push()` sequence as step 4/5 above.
 
-**Currently modifying:** n/a — retroactive trace
+**Currently modifying:** n/a — settled as of 2026-08-18, see decisions.md
+
+---
+
+## Manager console: floor view, shift assignment, manual booking, request approval
+
+**Entry point:** `GET /manager` (`app/manager/page.tsx`), reached via the Gate's "Studio manager" category or Chrome's role switch.
+
+**Path:**
+1. `app/manager/page.tsx` — resolves `managerId` from the identity cookie, renders `<Manager managerId>` →
+2. `components/Manager.tsx` `Manager()` — `useSnapshot({ kind: 'manager', id: managerId })` (`lib/store.ts`) polls `GET /api/snapshot?scope=manager&id=<managerId>` →
+3. `app/api/[...path]/route.ts` `snapshot()` — resolves the manager's `siteId` from the `managers` table, then applies `scopeSnapshotForManager(full, siteId)` (`lib/reference.ts`) — every coach/member/booking/shift at that site, plus the sessions/assessments/measurements/programs/checkins keyed to those members. Unlike the coach/member scopes, this is a *site* scope, not a *relationship* scope: a manager sees the whole floor, not just people they've personally touched →
+4. **Floor tab** — `DayTimeline` (`components/DayTimeline.tsx`) renders one row per coach for the viewed date, shift windows shaded and bookings as blocks, from the already-scoped `snap.shifts`/`snap.bookings`/`snap.coaches`. The intake form's `TimeSlotPicker` (`components/TimeSlotPicker.tsx`) calls `GET /api/coaches/:id/availability?date&serviceId` on every coach/service/date change, which runs `computeFreeSlots` (`lib/scheduling.ts`) against that coach's real shifts and bookings for the date; submitting calls `POST /bookings/manual`, which re-validates the same way server-side before inserting a `confirmed` booking. `RescheduleAction`/`ReassignAction` (module-scope, inside `Manager.tsx`) are the same pattern against `POST /bookings/:id/reschedule` / `/reassign` →
+5. **Requests tab** — `ApproveAction` (module-scope) picks a coach and calls the existing `POST /bookings/:id/confirm` (unchanged from the coach console's own confirm path — a manager and a coach approve through the identical write path) or `POST /bookings/:id/decline` →
+6. **Staff tab** — shift assignment form calls `POST /shifts` (inserts a row, no overlap check against that coach's other shifts — a manager can double-book a coach's own shift, only bookings are overlap-guarded); "Add a coach" calls `POST /coaches` with the manager's `siteId` →
+7. **Members tab** — roster from the scoped `snap.members`; "Add a member" calls `POST /members` with the manager's `siteId`.
+
+**Currently modifying:** n/a — settled as of 2026-08-18, see decisions.md
 
 ---
 

@@ -1,35 +1,40 @@
 'use client';
 
-import { createTheme } from '@mui/material/styles';
+import { createTheme, alpha } from '@mui/material/styles';
+import type { Theme } from '@mui/material/styles';
 
 /**
- * Marn theme — brand system, dark-first.
+ * Marn theme — brand system, now dual-scheme (light default, dark kept).
  *
  * This file is visual truth. Every colour, font, radius, spacing step, and
  * elevation used anywhere in the app resolves here. Hardcoding a value in a
  * component is a defect.
  *
- * Source: `Marn wellness brand design system/design_handoff_marn_app/README.md`
- * (prose spec) cross-checked against `Marn Design System.dc.html` §08's JSON
- * token block, which wins on any hex/spacing precision mismatch. The app is
- * dark-first by design — the handoff's light palette is scoped to "web,
- * email, print" contexts that don't apply here, so it isn't wired as a second
- * MUI theme; `marnPaletteLight` below is kept only as a reference in case a
- * genuinely light-mode surface (marketing site, printable report) is ever
- * built. See prototype/decisions.md for the palette-swap rationale.
+ * Light/dark wiring follows the root product's proven pattern exactly
+ * (theme/theme.ts there, see its own header comment) — MUI's CSS-variables
+ * `colorSchemes`, not two separate `createTheme()` calls: `cssVariables`
+ * must use the *literal* attribute name `data-mui-color-scheme`, not the
+ * `'data'` shorthand (which targets a boolean `[data-dark]` attribute that
+ * nothing sets) — the root product hit and documented this exact bug before
+ * catching it in a real browser, not from `tsc`/`build`. `defaultColorScheme`
+ * here plus `InitColorSchemeScript`'s own `defaultMode` (app/layout.tsx) both
+ * need to agree, and `ThemeProvider` needs its *own* `defaultMode` prop too —
+ * three separate places that must all say the same thing, or hydration picks
+ * a different scheme than the pre-hydration script painted.
  *
- * `marnColor`/`bands`/`ambientWash` are exported as plain objects (not just
- * buried inside `createTheme`) so non-component consumers that cannot call
- * `useTheme()` — `lib/reference.ts`'s legacy `colorOf`, and
- * `app/globals.css`'s custom properties feeding the debug-only `Panels.tsx`
- * dock (plain CSS on purpose, not part of the MUI migration) — read the same
- * values instead of re-typing hex literals. CSS custom properties can't
- * import from TypeScript, so `globals.css` duplicates these by hand; keep the
- * two in sync if a token changes here.
+ * Light is the *user-facing default* per explicit product direction — dark
+ * was the brand handoff's original default and is kept, reachable via the
+ * toggle in Chrome.tsx / Gate.tsx (`useColorScheme()`).
  *
- * Font families load via `next/font/google` in `app/layout.tsx` as
- * `--font-petrona` (display/serif) and `--font-figtree` (UI/sans, also the
- * numeral face — tabular figures, no monospace anywhere in this system).
+ * The light palette is a deliberate departure from the brand handoff's own
+ * light tokens (warm off-white/bronze, see the reference `marnPaletteLight`
+ * export below): explicit product direction was "white background, text and
+ * outlines in shades of black, colour reserved for what's actually
+ * highlighted" — a neutral, high-contrast, editorial look, not a tinted
+ * restatement of the dark palette. Brand accent colours (brass/celadon,
+ * deepened for AA contrast on white — same values the root product already
+ * derived for its own light scheme) are kept for exactly that: primary
+ * actions, selection, focus — the "highlighted" case.
  */
 
 export const marnColor = {
@@ -46,7 +51,8 @@ export const marnColor = {
   secondary: '#8FCBB8',
 } as const;
 
-/** Reference only — light-mode tokens for a future web/email/print surface. Not wired into this theme. */
+/** Reference only — the brand handoff's own (warm, tinted) light tokens.
+ * Not wired into `colorSchemes.light` below; see the header comment for why. */
 export const marnPaletteLight = {
   background: '#EFECE2',
   surface: '#F9F7F0',
@@ -57,10 +63,30 @@ export const marnPaletteLight = {
   secondary: '#1F6152',
 } as const;
 
+/* Neutral black/white light scheme — white surfaces, grayscale-only text and
+   borders ("shades of black," not a tint), colour reserved for primary/
+   secondary (the "highlighted" case). */
+const lightColor = {
+  background: '#FFFFFF',
+  surface: '#FFFFFF',
+  surfaceRaised: '#F4F4F4',
+  line: '#242424',
+  lineStrong: '#141414',
+  textPrimary: '#0D0D0D',
+  textSecondary: '#4D4D4D',
+  textMuted: '#8A8A8A',
+  primary: '#6E5220',
+  primaryHover: '#8A6A32',
+  secondary: '#1F6152',
+} as const;
+
 /**
  * Status bands. "Four states on a journey, not a triage" — ramp runs stone →
  * ochre → jade → celadon, deliberately with no red: green sits in the
  * middle, not the top, so nothing reads as an alarm or an all-clear.
+ * Kept scheme-invariant (same four hex values in light and dark) — these are
+ * data-viz accent colours, not neutrals, and read fine against either
+ * background; a per-scheme retune is a follow-up if that stops being true.
  */
 export const bands = {
   restricted: '#8B9691',
@@ -79,8 +105,10 @@ export type Band = keyof typeof bands;
  * clinical-alarm connotation CLAUDE.md rules out. See prototype/decisions.md.
  */
 const errorColor = '#B9573E';
+const errorColorLight = '#A34A34';
 
-/** Ambient wash — one soft leak of colour from the top edge per tab, cross-faded on tab change. */
+/** Ambient wash — one soft leak of colour from the top edge per tab, cross-faded on tab change.
+ * Kept scheme-invariant (low-alpha accent over whichever background is active) — same reasoning as `bands`. */
 export const ambientWash: Record<'today' | 'progress' | 'sessions', string> = {
   today:
     'radial-gradient(130% 44% at 18% -8%, rgba(200,164,106,.20) 0%, rgba(200,164,106,0) 62%), ' +
@@ -95,29 +123,49 @@ export const ambientWash: Record<'today' | 'progress' | 'sessions', string> = {
 
 export const radiusScale = { sm: 12, md: 18, lg: 24, pill: 999 } as const;
 
-/** Three elevation levels, spreadable straight into an `sx` prop. Level 1 is a *selection* treatment, not decoration — a selected panel moves border + glow + background at once, never colour alone. */
-export const elevationPreset = {
-  resting: {
-    bgcolor: marnColor.surface,
-    border: '1px solid',
-    borderColor: marnColor.line,
-    boxShadow: 'none',
-  },
-  selected: {
-    bgcolor: marnColor.surfaceRaised,
-    border: '1px solid',
-    borderColor: 'rgba(200,164,106,.55)',
-    boxShadow:
-      'inset 0 1px 0 rgba(240,239,233,.08), 0 0 0 3px rgba(200,164,106,.12), 0 10px 24px rgba(0,0,0,.55)',
-  },
-  floating: {
-    bgcolor: marnColor.surfaceRaised,
-    border: '1px solid',
-    borderColor: marnColor.lineStrong,
-    boxShadow:
-      'inset 0 1px 0 rgba(240,239,233,.06), 0 2px 6px rgba(0,0,0,.4), 0 24px 60px rgba(0,0,0,.7)',
-  },
-} as const;
+/**
+ * Three elevation levels. A function of the active theme (not a static
+ * object) so the shadow/border recipe can read the live palette — bgcolor
+ * and borderColor are plain theme-token strings (`'background.paper'`,
+ * `'divider'`, ...), which MUI's sx system resolves against whichever
+ * colour scheme is active; the boxShadow strings need real rgba() (can't
+ * embed a bare token inside a shadow value), so those alone branch on
+ * `t.palette.mode` — a light surface wants a true dark drop-shadow, a dark
+ * surface wants a faint highlight instead. Level 1 ("selected") is a
+ * *selection* treatment, not decoration — a selected panel moves border +
+ * glow + background at once, never colour alone.
+ */
+export function elevationPreset(t: Theme) {
+  const dark = t.palette.mode === 'dark';
+  return {
+    resting: {
+      bgcolor: 'background.paper',
+      border: '1px solid',
+      borderColor: 'divider',
+      boxShadow: 'none',
+    },
+    selected: {
+      bgcolor: 'background.raised',
+      border: '1px solid',
+      borderColor: alpha(t.palette.primary.main, 0.55),
+      boxShadow: [
+        `inset 0 1px 0 ${alpha(dark ? '#F0EFE9' : '#FFFFFF', dark ? 0.08 : 0.6)}`,
+        `0 0 0 3px ${alpha(t.palette.primary.main, 0.12)}`,
+        `0 10px 24px ${alpha('#000000', dark ? 0.55 : 0.12)}`,
+      ].join(', '),
+    },
+    floating: {
+      bgcolor: 'background.raised',
+      border: '1px solid',
+      borderColor: 'lineStrong',
+      boxShadow: [
+        `inset 0 1px 0 ${alpha(dark ? '#F0EFE9' : '#FFFFFF', dark ? 0.06 : 0.5)}`,
+        `0 2px 6px ${alpha('#000000', dark ? 0.4 : 0.06)}`,
+        `0 24px 60px ${alpha('#000000', dark ? 0.7 : 0.12)}`,
+      ].join(', '),
+    },
+  } as const;
+}
 
 declare module '@mui/material/styles' {
   interface Theme {
@@ -135,6 +183,13 @@ declare module '@mui/material/styles' {
       radius: typeof radiusScale;
       elevation: typeof elevationPreset;
     };
+  }
+  interface Palette {
+    /** Chips, segmented controls, nested/selected panels. */
+    lineStrong: string;
+  }
+  interface PaletteOptions {
+    lineStrong?: string;
   }
   interface TypeBackground {
     /** `surfaceRaised` — chips, segmented controls, nested cards, selected panels. */
@@ -158,7 +213,10 @@ const display = 'var(--font-petrona), Georgia, serif';
 const ui = 'var(--font-figtree), system-ui, -apple-system, sans-serif';
 
 const theme = createTheme({
-  cssVariables: true,
+  // Must be the literal attribute name, not the 'data' shorthand — see the
+  // header comment; confirmed against the root product's own documented fix.
+  cssVariables: { colorSchemeSelector: 'data-mui-color-scheme' },
+  defaultColorScheme: 'light',
   // direction: 'rtl' when the Arabic locale ships. Components already use
   // logical properties (marginInlineStart, not ml) so this is the only change.
   direction: 'ltr',
@@ -171,36 +229,65 @@ const theme = createTheme({
 
   marn: { bands, ambientWash, radius: radiusScale, elevation: elevationPreset },
 
-  palette: {
-    mode: 'dark',
-    primary: {
-      main: marnColor.primary,
-      light: marnColor.primaryHover, // hover/press
-      dark: marnColor.primary,
-      contrastText: marnColor.background,
+  colorSchemes: {
+    light: {
+      palette: {
+        primary: {
+          main: lightColor.primary,
+          light: lightColor.primaryHover,
+          dark: lightColor.primary,
+          contrastText: '#FFFFFF',
+        },
+        secondary: {
+          main: lightColor.secondary,
+          contrastText: '#FFFFFF',
+        },
+        background: {
+          default: lightColor.background,
+          paper: lightColor.surface,
+          raised: lightColor.surfaceRaised,
+        },
+        text: {
+          primary: lightColor.textPrimary,
+          secondary: lightColor.textSecondary,
+          disabled: lightColor.textMuted,
+        },
+        divider: lightColor.line,
+        lineStrong: lightColor.lineStrong,
+        warning: { main: bands.limited },
+        success: { main: bands.optimal },
+        error: { main: errorColorLight },
+      },
     },
-    secondary: {
-      main: marnColor.secondary,
-      contrastText: marnColor.background,
+    dark: {
+      palette: {
+        primary: {
+          main: marnColor.primary,
+          light: marnColor.primaryHover,
+          dark: marnColor.primary,
+          contrastText: marnColor.background,
+        },
+        secondary: {
+          main: marnColor.secondary,
+          contrastText: marnColor.background,
+        },
+        background: {
+          default: marnColor.background,
+          paper: marnColor.surface,
+          raised: marnColor.surfaceRaised,
+        },
+        text: {
+          primary: marnColor.textPrimary,
+          secondary: marnColor.textSecondary,
+          disabled: marnColor.textMuted,
+        },
+        divider: marnColor.line,
+        lineStrong: marnColor.lineStrong,
+        warning: { main: bands.limited },
+        success: { main: bands.optimal },
+        error: { main: errorColor },
+      },
     },
-    background: {
-      default: marnColor.background,
-      paper: marnColor.surface,
-      raised: marnColor.surfaceRaised,
-    },
-    text: {
-      primary: marnColor.textPrimary,
-      secondary: marnColor.textSecondary,
-      disabled: marnColor.textMuted,
-    },
-    divider: marnColor.line,
-    // Reserved: an open safety flag / "needs a look" state. Ochre reads as
-    // "movement returning", not an alarm — consistent with the no-red rule.
-    warning: { main: bands.limited },
-    // Measured positive change / everyday target range reached.
-    success: { main: bands.optimal },
-    // App-level failures only (network, validation) — never a status band.
-    error: { main: errorColor },
   },
 
   typography: {
@@ -243,7 +330,7 @@ const theme = createTheme({
     MuiCssBaseline: {
       styleOverrides: {
         body: {
-          backgroundColor: marnColor.background,
+          backgroundColor: 'var(--mui-palette-background-default)',
           // "Figtree 600 with font-variant-numeric: tabular-nums set globally" — no third family, no monospace anywhere.
           fontVariantNumeric: 'tabular-nums',
         },
@@ -252,18 +339,18 @@ const theme = createTheme({
     MuiButton: {
       defaultProps: { disableElevation: true },
       styleOverrides: {
-        root: ({ ownerState }) => ({
+        root: ({ theme: t, ownerState }) => ({
           borderRadius: radiusScale.pill,
           paddingInline: 20,
           paddingBlock: 15,
           fontSize: 15,
           ...(ownerState.variant === 'contained' && ownerState.color === 'primary' && {
-            color: marnColor.background,
-            '&:hover': { backgroundColor: marnColor.primaryHover },
+            color: t.vars.palette.primary.contrastText,
+            '&:hover': { backgroundColor: t.vars.palette.primary.light },
           }),
           ...(ownerState.variant === 'outlined' && {
-            borderColor: marnColor.line,
-            '&:hover': { backgroundColor: marnColor.surface, borderColor: marnColor.line },
+            borderColor: t.vars.palette.divider,
+            '&:hover': { backgroundColor: t.vars.palette.background.paper, borderColor: t.vars.palette.divider },
           }),
         }),
       },
@@ -283,7 +370,7 @@ const theme = createTheme({
       // Flat, bordered cards — no drop shadow at rest (see theme.marn.elevation).
       defaultProps: { variant: 'outlined' },
       styleOverrides: {
-        root: { backgroundImage: 'none', borderColor: marnColor.line, borderRadius: radiusScale.md },
+        root: ({ theme: t }) => ({ backgroundImage: 'none', borderColor: t.vars.palette.divider, borderRadius: radiusScale.md }),
       },
     },
     MuiCard: {
@@ -291,10 +378,10 @@ const theme = createTheme({
     },
     MuiTableCell: {
       styleOverrides: {
-        root: {
-          borderColor: marnColor.line,
+        root: ({ theme: t }) => ({
+          borderColor: t.vars.palette.divider,
           '&.MuiTableCell-alignRight': { fontVariantNumeric: 'tabular-nums', fontWeight: 600 },
-        },
+        }),
       },
     },
     MuiTypography: {
@@ -302,18 +389,113 @@ const theme = createTheme({
         variantMapping: { readout: 'span' },
       },
     },
+    /* Glass app bar — translucent + blurred rather than a flat opaque strip.
+       Applies everywhere Chrome.tsx's AppBar is used, no per-screen work. */
     MuiAppBar: {
-      styleOverrides: { root: { backgroundImage: 'none' } },
+      styleOverrides: {
+        root: ({ theme: t }) => ({
+          backgroundImage: 'none',
+          backgroundColor: alpha(t.palette.mode === 'dark' ? marnColor.surface : lightColor.surface, 0.72),
+          backdropFilter: 'blur(20px) saturate(160%)',
+          WebkitBackdropFilter: 'blur(20px) saturate(160%)',
+        }),
+      },
+    },
+    /* Segmented pill control — a track with a solid selected pill, not
+       bordered buttons in a row. One change here upgrades every category /
+       role / site toggle in the app (Gate, Chrome, Manager, Admin, Member's
+       booking picker) without touching each call site. */
+    MuiToggleButtonGroup: {
+      styleOverrides: {
+        root: ({ theme: t }) => ({
+          backgroundColor: t.vars.palette.background.raised,
+          borderRadius: radiusScale.pill,
+          padding: 4,
+          gap: 4,
+        }),
+        grouped: {
+          border: 'none',
+          '&.Mui-disabled': { border: 'none' },
+        },
+      },
+    },
+    MuiToggleButton: {
+      styleOverrides: {
+        root: ({ theme: t }) => ({
+          border: 'none',
+          borderRadius: `${radiusScale.pill}px !important`,
+          fontWeight: 600,
+          fontSize: 14,
+          textTransform: 'none',
+          paddingInline: 16,
+          color: t.vars.palette.text.secondary,
+          transition: 'background-color 160ms ease, color 160ms ease, box-shadow 160ms ease',
+          '&.Mui-selected, &.Mui-selected:hover': {
+            backgroundColor: t.vars.palette.primary.main,
+            color: t.vars.palette.primary.contrastText,
+            boxShadow: `0 4px 14px ${alpha(t.palette.primary.main, 0.35)}`,
+          },
+          '&:hover': { backgroundColor: alpha(t.palette.text.primary, 0.06) },
+        }),
+      },
+    },
+    /* Rounded pill indicator instead of MUI's default hairline underline. */
+    MuiTabs: {
+      styleOverrides: {
+        root: { minHeight: 44 },
+        indicator: { height: 3, borderRadius: radiusScale.pill },
+      },
+    },
+    MuiTab: {
+      styleOverrides: {
+        root: ({ theme: t }) => ({
+          textTransform: 'none',
+          fontWeight: 600,
+          minHeight: 44,
+          fontSize: 15,
+          color: t.vars.palette.text.secondary,
+          '&.Mui-selected': { color: t.vars.palette.primary.main },
+        }),
+      },
+    },
+    /* Floating elevation (theme.marn.elevation(t).floating, restated as raw
+       CSS here since styleOverrides can't call back into itself) for every
+       popover-style surface — dropdown menus, the reschedule/reassign
+       popovers — so they read as lifted, not flat. */
+    MuiMenu: {
+      styleOverrides: {
+        paper: ({ theme: t }) => ({
+          borderRadius: radiusScale.md,
+          border: `1px solid ${t.vars.palette.lineStrong}`,
+          boxShadow: `inset 0 1px 0 ${alpha('#FFFFFF', t.palette.mode === 'dark' ? 0.06 : 0.5)}, 0 2px 6px ${alpha('#000000', t.palette.mode === 'dark' ? 0.4 : 0.08)}, 0 24px 60px ${alpha('#000000', t.palette.mode === 'dark' ? 0.7 : 0.14)}`,
+        }),
+      },
+    },
+    MuiPopover: {
+      styleOverrides: {
+        paper: ({ theme: t }) => ({
+          borderRadius: radiusScale.md,
+          border: `1px solid ${t.vars.palette.lineStrong}`,
+          boxShadow: `inset 0 1px 0 ${alpha('#FFFFFF', t.palette.mode === 'dark' ? 0.06 : 0.5)}, 0 2px 6px ${alpha('#000000', t.palette.mode === 'dark' ? 0.4 : 0.08)}, 0 24px 60px ${alpha('#000000', t.palette.mode === 'dark' ? 0.7 : 0.14)}`,
+        }),
+      },
+    },
+    MuiTableRow: {
+      styleOverrides: {
+        root: {
+          transition: 'background-color 120ms ease',
+        },
+      },
     },
     MuiBottomNavigation: {
       styleOverrides: { root: { backgroundColor: 'transparent' } },
     },
     MuiBottomNavigationAction: {
       styleOverrides: {
-        root: {
-          color: marnColor.textMuted,
-          '&.Mui-selected': { color: marnColor.primary },
-        },
+        root: ({ theme: t }) => ({
+          color: t.vars.palette.text.disabled,
+          '&.Mui-selected': { color: t.vars.palette.primary.main },
+        }),
         label: {
           fontWeight: 500,
           '&.Mui-selected': { fontWeight: 600, fontSize: '0.75rem' },

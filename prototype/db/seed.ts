@@ -1,20 +1,31 @@
 import 'dotenv/config';
 import { db, schema } from './index';
-import { MUSCLES, service, addon, iso, addDays, clamp } from '../lib/reference';
+import { MUSCLES, SITES, service, iso, addDays, clamp } from '../lib/reference';
 import { computeScores } from '../lib/scoring';
 
-const { coaches, members, flags, assessments, measurements, bookings, sessions, programs, checkins, scoreDays } = schema;
+const {
+  managers, coaches, members, flags, assessments, measurements, bookings, sessions, programs, checkins,
+  scoreDays, shifts,
+} = schema;
 
 /* ---------------------------------------------------------------------------
-   Seeds three personas whose data shapes differ enough to be worth looking at:
+   Seeds three studios' worth of demo data: one manager, four coaches and
+   fifty members per site (`SITES` in lib/reference.ts), all displayed as
+   "Test User (###)" — a single global sequence across managers, coaches and
+   members so every seeded person has a unique, obviously-fake name.
 
-     Layla  — power user, 9 months, 48 sessions, wearable linked. The graph has
-              a real story: big early gains, a plateau, then a second climb.
-     Amira  — regular, 4 months, steady, one open safety flag.
-     Tom    — brand new. No assessment, no sessions, PAR-Q outstanding.
-              This is the empty state, and it is the one people forget to design.
+   Members are split into three tiers per site so the range of member
+   journeys (empty state, steady progress, long-tenure power user) is real
+   at every site, not just at s1:
 
-   Run: npm run db:seed   (safe to re-run — wipes demo rows first)
+     new    (8/site)  — joined this week, nothing captured yet.
+     active (32/site) — weeks to months in, steady assessment/session cadence.
+     power  (10/site) — the longest-tenured, wearable-linked, dense history.
+
+   Every row this script writes carries isDemo: true (or, for tables without
+   the column, is deleted first) so "Reset demo data" — POST /admin/seed,
+   wired to Gate.tsx / Chrome.tsx's menu — stays a complete, safe wipe no
+   matter how much activity accumulates. Run: npm run db:seed.
 --------------------------------------------------------------------------- */
 
 const T0 = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; })();
@@ -23,17 +34,24 @@ const BASE: Record<string, number> = {
   lower_back: 50, thoracic: 36, shoulders: 112, chest: 32, neck: 74,
 };
 
-const COACHES = [
-  { id: 'c1', name: 'Sara Haddad',   initials: 'SH', title: 'Lead Flexologist' },
-  { id: 'c2', name: 'Omar Nasser',   initials: 'ON', title: 'Flexologist' },
-  { id: 'c3', name: 'Lina Farouk',   initials: 'LF', title: 'Flexologist' },
-];
+const COACHES_PER_SITE = 4;
+const MEMBERS_PER_SITE = { new: 8, active: 32, power: 10 } as const;
 
 const MOVES = [
   { n: 'Couch stretch', d: '2 × 45s per side' },
   { n: '90/90 hip switch', d: '8 slow reps' },
   { n: 'Thoracic opener over roller', d: '60s' },
   { n: 'Doorway pec stretch', d: '2 × 30s per side' },
+  { n: 'Wall slide', d: '10 slow reps' },
+];
+
+const SESSION_NOTES = [
+  { coach: 'Full-body pass. Right hip still the limiter under load; PNF gave a clean end-range gain. Boots after.', member: 'Full session today with boots to finish. Your right hip is still the tightest link, but it moved well by the third set.' },
+  { coach: 'Focused lower chain. Hamstring end-range improving session on session.', member: 'Lower body focus. Hamstrings opened up nicely — that is a run of sessions in a row with a gain.' },
+  { coach: 'Left side notably tighter than right. Held 3×30s PNF each side, good end-range gain by set three.', member: 'We worked mainly on your hips today. Your left side is tighter than your right, so we spent extra time there.' },
+  { coach: 'Thoracic rotation limited both directions. Boots 15 min after.', member: 'Your mid-back is the limiter on overhead reach — that is our focus for the next block.' },
+  { coach: 'Shoulder end-range better than last visit. Kept load light, prioritised control over range.', member: 'Shoulders felt easier today. We kept things light and focused on control rather than pushing range.' },
+  { coach: 'Calves and ankles first, then a full-body pass. Good session overall, low RPE throughout.', member: 'Ankle mobility work today, then a full pass. Should feel looser on your next run.' },
 ];
 
 function measuresFor(gainFactor: number, offset = 0) {
@@ -48,136 +66,236 @@ function measuresFor(gainFactor: number, offset = 0) {
   });
 }
 
+const randInt = (min: number, max: number) => min + Math.floor(Math.random() * (max - min + 1));
+const pick = <T,>(arr: readonly T[]) => arr[randInt(0, arr.length - 1)];
+const pad3 = (n: number) => String(n).padStart(3, '0');
+
+/* The Neon HTTP driver rejects very large single INSERTs (measurements alone
+   runs to several thousand rows across three studios) — batch every bulk
+   insert so seeding stays robust regardless of table size. */
+async function insertInBatches(table: any, rows: any[], size = 300) {
+  for (let i = 0; i < rows.length; i += size) {
+    await db.insert(table).values(rows.slice(i, i + size) as any);
+  }
+}
+
 async function wipe() {
-  for (const t of [measurements, assessments, sessions, bookings, programs, checkins, flags, scoreDays, members, coaches]) {
+  for (const t of [
+    measurements, assessments, sessions, bookings, programs, checkins, flags, scoreDays, shifts,
+    members, coaches, managers,
+  ]) {
     await db.delete(t as any);
   }
 }
 
 export async function seed() {
   await wipe();
-  await db.insert(coaches).values(COACHES.map((c) => ({ ...c, siteId: 's1', isDemo: true })) as any);
 
-  /* ---- members ---------------------------------------------------------- */
-  await db.insert(members).values([
-    { id: 'm_layla', name: 'Layla Mansour', phone: '+971 50 441 8802', goal: 'Run a sub-2h half marathon without hip pain',
-      persona: 'power', joinedAt: iso(addDays(T0, -274)), credits: 14, streak: 41, wearable: 'whoop',
-      parqCleared: true, parqAt: iso(addDays(T0, -274)), isDemo: true },
-    { id: 'm_amira', name: 'Amira Khalid', phone: '+971 50 218 4471', goal: 'Undo the desk hunch, get overhead reach back',
-      persona: 'active', joinedAt: iso(addDays(T0, -119)), credits: 6, streak: 5, wearable: null,
-      parqCleared: true, parqAt: iso(addDays(T0, -119)), isDemo: true },
-    { id: 'm_tom', name: 'Tom Whitfield', phone: '+971 56 771 2094', goal: 'Lower back stiffness after long drives',
-      persona: 'new', joinedAt: iso(T0), credits: 0, streak: 0, wearable: null,
-      parqCleared: false, parqAt: null, isDemo: true },
-  ] as any);
+  /* A single running counter gives every seeded person — manager, coach or
+     member, any site — a unique "Test User (###)" display name. */
+  let personNo = 0;
+  const nextName = () => `Test User (${pad3(++personNo)})`;
 
-  await db.insert(flags).values([
-    { id: 'fl_1', memberId: 'm_amira', text: 'Right shoulder impingement — avoid end-range overhead loading.', since: iso(addDays(T0, -56)) },
-    { id: 'fl_2', memberId: 'm_tom', text: 'PAR-Q not completed. Screen before first session.', since: iso(T0) },
-  ] as any);
+  const mgrRows: any[] = [];
+  const coachRows: any[] = [];
+  const shiftRows: any[] = [];
+  const memberRows: any[] = [];
+  const flagRows: any[] = [];
+  const assessmentRows: any[] = [];
+  const measurementRows: any[] = [];
+  const sessionRows: any[] = [];
+  const programRows: any[] = [];
+  const checkinRows: any[] = [];
+  const bookingRows: any[] = [];
+  const scoreDayRows: any[] = [];
 
-  /* ---- assessments ------------------------------------------------------ */
-  // Layla: 12 assessments over 9 months. Fast gains, plateau, second climb.
-  const laylaCurve = [0, .10, .19, .27, .33, .36, .37, .37, .38, .46, .55, .62];
-  const laylaAs: any[] = [], laylaMs: any[] = [];
-  laylaCurve.forEach((g, i) => {
-    const id = `as_layla_${i}`;
-    const day = iso(addDays(T0, -(274 - i * 24)));
-    laylaAs.push({ id, memberId: 'm_layla', coachId: COACHES[i % 3].id, capturedAt: day,
-      source: i % 3 === 2 ? 'manual' : 'bodymap', deviceId: i % 3 === 2 ? null : 'BM-DXB-002' });
-    measuresFor(g, 2).forEach((m) => laylaMs.push({ assessmentId: id, memberId: 'm_layla', ...m }));
-  });
-
-  // Amira: 5 assessments over 4 months, modest steady gains.
-  const amiraCurve = [0, .06, .11, .15, .18];
-  const amiraAs: any[] = [], amiraMs: any[] = [];
-  amiraCurve.forEach((g, i) => {
-    const id = `as_amira_${i}`;
-    const day = iso(addDays(T0, -(119 - i * 27)));
-    amiraAs.push({ id, memberId: 'm_amira', coachId: COACHES[i % 3].id, capturedAt: day,
-      source: i === 4 ? 'bodymap' : 'manual', deviceId: i === 4 ? 'BM-DXB-002' : null });
-    measuresFor(g).forEach((m) => amiraMs.push({ assessmentId: id, memberId: 'm_amira', ...m }));
-  });
-
-  await db.insert(assessments).values([...laylaAs, ...amiraAs] as any);
-  await db.insert(measurements).values([...laylaMs, ...amiraMs] as any);
-
-  /* ---- sessions --------------------------------------------------------- */
-  const sess: any[] = [];
-  for (let i = 0; i < 48; i++) {
-    const day = addDays(T0, -(266 - i * 5.5));
-    const rpe = 5 + (i % 4 === 0 ? 2 : i % 3 === 0 ? 1 : 0);
-    const pb = 6 - Math.floor(i / 14);
-    sess.push({
-      id: `se_layla_${i}`, memberId: 'm_layla', coachId: COACHES[i % 3].id, bookingId: null,
-      completedAt: iso(day), mins: i % 4 === 0 ? 60 : 30,
-      modalities: i % 4 === 0 ? ['Assisted stretch', 'PNF', 'Compression boots'] : ['Assisted stretch', 'PNF'],
-      rpe, painBefore: Math.max(pb, 1), painAfter: Math.max(pb - 3, 0),
-      coachNotes: i % 4 === 0
-        ? 'Full-body pass. Right hip still the limiter under load; PNF gave a clean 6° at end range. Boots 15 min after.'
-        : 'Focused lower chain. Hamstring end-range improving session on session.',
-      memberSummary: i % 4 === 0
-        ? 'Full session today with boots to finish. Your right hip is still the tightest link, but it moved well by the third set. Keep the 90/90 work going.'
-        : 'Lower body focus. Hamstrings opened up nicely — that is the third session in a row with a gain.',
-    });
+  const shiftDates: string[] = [];
+  for (let i = -14; i <= 7; i++) {
+    const d = addDays(T0, i);
+    if (d.getDay() !== 0 && d.getDay() !== 6) shiftDates.push(iso(d)); // Mon–Fri
   }
-  sess.push(
-    { id: 'se_amira_1', memberId: 'm_amira', coachId: 'c1', bookingId: null, completedAt: iso(addDays(T0, -4)),
-      mins: 30, modalities: ['Assisted stretch', 'PNF'], rpe: 6, painBefore: 5, painAfter: 2,
-      coachNotes: 'Left hamstring notably tighter than right. Held 3×30s PNF each side, good end-range gain by set three. Watch the right shoulder on overhead work.',
-      memberSummary: 'We worked mainly on your hamstrings and hips today. Your left side is tighter than your right, so we spent extra time there. Keep the couch stretch going twice a day and we should see the gap close by your next re-test.' },
-    { id: 'se_amira_2', memberId: 'm_amira', coachId: 'c3', bookingId: null, completedAt: iso(addDays(T0, -11)),
-      mins: 60, modalities: ['Assisted stretch', 'Compression boots'], rpe: 7, painBefore: 6, painAfter: 3,
-      coachNotes: 'Full-body pass. Thoracic rotation limited both directions. Boots 15 min after.',
-      memberSummary: 'Full-body session with compression boots to finish. Your mid-back is the limiter on overhead reach — that is our focus for the next block.' },
-  );
-  await db.insert(sessions).values(sess as any);
 
-  /* ---- programmes ------------------------------------------------------- */
-  await db.insert(programs).values([
-    { id: 'pg_layla', memberId: 'm_layla', coachId: 'c1', title: 'Hip Series — Block 7', assignedAt: iso(addDays(T0, -9)),
-      moves: MOVES, completions: [...Array(6)].map((_, i) => iso(addDays(T0, -(i + 1)))) },
-    { id: 'pg_amira', memberId: 'm_amira', coachId: 'c1', title: 'Desk Reset — Block 2', assignedAt: iso(addDays(T0, -4)),
-      moves: MOVES.slice(0, 3), completions: [iso(addDays(T0, -3)), iso(addDays(T0, -2))] },
-  ] as any);
+  for (const site of SITES) {
+    /* ---- manager ---------------------------------------------------- */
+    const mgrName = nextName();
+    const mgrId = `mg_${site.id}`;
+    mgrRows.push({
+      id: mgrId, name: mgrName,
+      initials: mgrName.match(/\d+/)![0].slice(-2),
+      siteId: site.id, isDemo: true,
+    });
 
-  /* ---- bookings --------------------------------------------------------- */
-  const bk = (id: string, memberId: string, coachId: string | null, sid: string, d: Date, time: string, status: string, addons: string[] = []) => ({
-    id, memberId, coachId, serviceId: sid, date: iso(d), time, status, addons,
-    aed: service(sid).aed + addons.reduce((s, a) => s + addon(a).aed, 0),
-  });
-  await db.insert(bookings).values([
-    bk('bk_1', 'm_layla', 'c1', 'st60', T0, '09:00', 'confirmed', ['hyd']),
-    bk('bk_2', 'm_amira', null, 'st30', T0, '11:30', 'requested'),
-    bk('bk_3', 'm_layla', 'c2', 'cb30', addDays(T0, 2), '18:00', 'confirmed'),
-    bk('bk_4', 'm_amira', 'c1', 'st30', addDays(T0, 1), '18:00', 'confirmed'),
-  ] as any);
-
-  await db.insert(checkins).values([
-    { id: 'ck_1', memberId: 'm_layla', sleep: 4, pain: 3, areas: ['right hip'], note: 'Long run yesterday, hip is stiff.' },
-  ] as any);
-
-  /* ---- score history ---------------------------------------------------- */
-  const rows: any[] = [];
-  const addSeries = (memberId: string, days: number, curve: (t: number) => number, wearable: boolean, streak: number) => {
-    for (let i = days - 1; i >= 0; i--) {
-      const t = (days - 1 - i) / (days - 1);
-      const ms = measuresFor(curve(t), memberId === 'm_layla' ? 2 : 0);
-      const sc = computeScores({
-        measurements: ms, adherence: 0.4 + t * 0.5, hasWearable: wearable,
-        recentRpe: 6 - Math.round(t), streak: Math.round(streak * t),
+    /* ---- coaches + shifts -------------------------------------------- */
+    const siteCoachIds: string[] = [];
+    for (let ci = 1; ci <= COACHES_PER_SITE; ci++) {
+      const name = nextName();
+      const id = `c_${site.id}_${ci}`;
+      siteCoachIds.push(id);
+      coachRows.push({
+        id, name, initials: name.match(/\d+/)![0].slice(-2),
+        title: ci === 1 ? 'Lead Flexologist' : 'Flexologist', siteId: site.id, isDemo: true,
       });
-      rows.push({ id: `sd_${memberId}_${i}`, memberId, date: iso(addDays(T0, -i)),
-        flexibility: sc.flexibility + (i % 3 === 0 ? 1 : 0),
-        mobility: sc.mobility - (i % 4 === 0 ? 1 : 0),
-        recovery: sc.recovery + (i % 5 === 0 ? 3 : i % 2 === 0 ? -2 : 0) });
+      const morning = ci % 2 === 1;
+      for (const d of shiftDates) {
+        shiftRows.push({
+          id: `sft_${id}_${d}`, coachId: id, siteId: site.id, date: d,
+          startTime: morning ? '08:00' : '14:00', endTime: morning ? '16:00' : '22:00',
+          createdByManagerId: mgrId, isDemo: true,
+        });
+      }
     }
-  };
-  addSeries('m_layla', 90, (t) => 0.37 + t * 0.25, true, 41);
-  addSeries('m_amira', 60, (t) => 0.10 + t * 0.08, false, 5);
-  await db.insert(scoreDays).values(rows as any);
 
-  return { coaches: COACHES.length, members: 3, sessions: sess.length, assessments: laylaAs.length + amiraAs.length };
+    /* ---- members ------------------------------------------------------ */
+    let memberSeq = 0;
+    const addMember = (tier: 'new' | 'active' | 'power') => {
+      memberSeq++;
+      const name = nextName();
+      const id = `m_${site.id}_${memberSeq}`;
+      const coachId = siteCoachIds[memberSeq % siteCoachIds.length];
+
+      const tenureDays = tier === 'new' ? randInt(0, 12) : tier === 'active' ? randInt(30, 160) : randInt(180, 320);
+      const joinedAt = iso(addDays(T0, -tenureDays));
+      const parqCleared = tier === 'new' ? Math.random() < 0.4 : true;
+      const wearable = tier === 'power' && Math.random() < 0.7 ? 'whoop' : null;
+      const streak = tier === 'power' ? randInt(10, 45) : tier === 'active' ? randInt(0, 10) : 0;
+
+      memberRows.push({
+        id, name, phone: `+971 5${randInt(0, 9)} ${randInt(100, 999)} ${randInt(1000, 9999)}`,
+        goal: pick(['Undo the desk hunch, get overhead reach back', 'Lower back stiffness after long drives', 'Run without hip pain', 'Recover faster between training sessions', 'Get overhead reach back for swimming', 'Loosen up after a desk job']),
+        persona: tier, joinedAt, siteId: site.id, credits: randInt(0, 12), streak, wearable,
+        parqCleared, parqAt: parqCleared ? joinedAt : null, isDemo: true,
+      });
+
+      if (!parqCleared) {
+        flagRows.push({ id: `fl_${id}_parq`, memberId: id, text: 'PAR-Q not completed. Screen before first session.', since: joinedAt });
+      }
+      if (tier !== 'new' && Math.random() < 0.15) {
+        flagRows.push({
+          id: `fl_${id}_safety`, memberId: id,
+          text: pick(['Right shoulder impingement — avoid end-range overhead loading.', 'Lower back flare-up last month — avoid deep flexion under load.', 'Recent ankle sprain — go easy on calf end-range.']),
+          since: iso(addDays(T0, -randInt(5, Math.min(tenureDays, 90)))),
+        });
+      }
+
+      if (tier === 'new') return; // genuinely empty state — no assessments/sessions yet
+
+      const assessmentCount = tier === 'active' ? randInt(3, 7) : randInt(8, 14);
+      const curveEnd = tier === 'active' ? 0.15 + Math.random() * 0.15 : 0.4 + Math.random() * 0.3;
+      const memberAs: any[] = [];
+      for (let i = 0; i < assessmentCount; i++) {
+        const t = i / Math.max(assessmentCount - 1, 1);
+        const gain = curveEnd * t;
+        const day = iso(addDays(T0, -Math.round(tenureDays * (1 - t))));
+        const asId = `as_${id}_${i}`;
+        memberAs.push({
+          id: asId, memberId: id, coachId, capturedAt: day,
+          source: i % 3 === 2 ? 'manual' : 'bodymap', deviceId: i % 3 === 2 ? null : 'BM-DXB-002',
+        });
+        measuresFor(gain, tier === 'power' ? 2 : 0).forEach((m) => measurementRows.push({ assessmentId: asId, memberId: id, ...m }));
+      }
+      assessmentRows.push(...memberAs);
+
+      const sessionCount = tier === 'active' ? randInt(4, 12) : randInt(20, 40);
+      for (let i = 0; i < sessionCount; i++) {
+        const t = i / Math.max(sessionCount - 1, 1);
+        const day = addDays(T0, -Math.round(tenureDays * (1 - t)) - 1);
+        const notes = pick(SESSION_NOTES);
+        const rpe = randInt(4, 8);
+        const painBefore = randInt(2, 7);
+        const painAfter = Math.max(painBefore - randInt(1, 4), 0);
+        sessionRows.push({
+          id: `se_${id}_${i}`, memberId: id, coachId: siteCoachIds[(memberSeq + i) % siteCoachIds.length], bookingId: null,
+          completedAt: iso(day), mins: i % 4 === 0 ? 60 : 30,
+          modalities: i % 4 === 0 ? ['Assisted stretch', 'PNF', 'Compression boots'] : ['Assisted stretch', 'PNF'],
+          rpe, painBefore, painAfter, coachNotes: notes.coach, memberSummary: notes.member,
+        });
+      }
+
+      if (Math.random() < 0.6) {
+        const nMoves = randInt(3, 4);
+        programRows.push({
+          id: `pg_${id}`, memberId: id, coachId, title: pick(['Desk Reset — Block 2', 'Hip Series — Block 3', 'Shoulder Reset — Block 1', 'Runner’s Chain — Block 4']),
+          assignedAt: iso(addDays(T0, -randInt(1, 10))),
+          moves: MOVES.slice(0, nMoves),
+          completions: [...Array(randInt(0, 6))].map((_, i) => iso(addDays(T0, -(i + 1)))),
+        });
+      }
+
+      // Weekly score history, capped to ~12 points so the payload stays bounded.
+      const weeks = Math.min(Math.floor(tenureDays / 7), 12);
+      for (let w = weeks; w >= 0; w--) {
+        const t = 1 - w / Math.max(weeks, 1);
+        const sc = computeScores({
+          measurements: measuresFor(curveEnd * t, tier === 'power' ? 2 : 0),
+          adherence: 0.4 + t * 0.5, hasWearable: !!wearable, recentRpe: 6, streak: Math.round(streak * t),
+        });
+        scoreDayRows.push({ id: `sd_${id}_${w}`, memberId: id, date: iso(addDays(T0, -w * 7)), ...sc });
+      }
+
+      // One upcoming confirmed booking during the assigned coach's shift, plus
+      // an occasional unassigned request so the inbox isn't ever empty.
+      if (Math.random() < 0.7) {
+        const svc = pick(['st30', 'st60', 'cb30', 'ox20']);
+        const sv = service(svc)!;
+        const daysOut = randInt(0, 6);
+        const morning = siteCoachIds.indexOf(coachId) % 2 === 0;
+        const time = morning ? pick(['08:00', '09:00', '10:30']) : pick(['14:30', '16:00', '18:00']);
+        bookingRows.push({
+          id: `bk_${id}_1`, memberId: id, coachId, siteId: site.id, serviceId: sv.id,
+          date: iso(addDays(T0, daysOut)), time, status: daysOut === 0 ? 'confirmed' : pick(['confirmed', 'confirmed', 'requested']),
+          addons: [], aed: sv.aed,
+        });
+      }
+    };
+
+    for (let i = 0; i < MEMBERS_PER_SITE.new; i++) addMember('new');
+    for (let i = 0; i < MEMBERS_PER_SITE.active; i++) addMember('active');
+    for (let i = 0; i < MEMBERS_PER_SITE.power; i++) addMember('power');
+
+    // A couple of studio-wide unassigned requests, independent of any one
+    // member's own booking, so the manager/coach inbox has real volume.
+    const parqedMembers = memberRows.filter((m) => m.siteId === site.id && m.parqCleared);
+    for (let i = 0; i < 3; i++) {
+      const m = pick(parqedMembers);
+      const svc = pick(['st30', 'st60', 'cb30', 'ox20']);
+      const sv = service(svc)!;
+      bookingRows.push({
+        id: `bk_req_${site.id}_${i}`, memberId: m.id, coachId: null, siteId: site.id, serviceId: sv.id,
+        date: iso(addDays(T0, randInt(1, 5))), time: pick(['09:00', '11:30', '15:00', '17:30']),
+        status: 'requested', addons: [], aed: sv.aed,
+      });
+    }
+
+    // A handful of pre-session check-ins dated today, for the coach/manager floor view.
+    const checkinCandidates = memberRows.filter((m) => m.siteId === site.id && m.persona !== 'new');
+    for (let i = 0; i < Math.min(4, checkinCandidates.length); i++) {
+      const m = pick(checkinCandidates);
+      checkinRows.push({
+        id: `ck_${site.id}_${i}`, memberId: m.id, sleep: randInt(2, 5), pain: randInt(1, 7),
+        areas: [pick(['lower back', 'right hip', 'left shoulder', 'neck', 'hamstrings'])],
+        note: pick(['Long day yesterday, a bit stiff.', 'Slept badly, feeling tight.', 'Ran yesterday, hip is stiff.', null]),
+      });
+    }
+  }
+
+  await insertInBatches(managers, mgrRows);
+  await insertInBatches(coaches, coachRows);
+  await insertInBatches(shifts, shiftRows);
+  await insertInBatches(members, memberRows);
+  await insertInBatches(flags, flagRows);
+  await insertInBatches(assessments, assessmentRows);
+  await insertInBatches(measurements, measurementRows);
+  await insertInBatches(sessions, sessionRows);
+  await insertInBatches(programs, programRows);
+  await insertInBatches(checkins, checkinRows);
+  await insertInBatches(bookings, bookingRows);
+  await insertInBatches(scoreDays, scoreDayRows);
+
+  return {
+    sites: SITES.length, managers: mgrRows.length, coaches: coachRows.length, shifts: shiftRows.length,
+    members: memberRows.length, sessions: sessionRows.length, assessments: assessmentRows.length,
+    bookings: bookingRows.length,
+  };
 }
 
 /* allow `npm run db:seed` */

@@ -1,14 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { eq, desc, and, inArray } from 'drizzle-orm';
+import { eq, desc, and, inArray, ilike, sql } from 'drizzle-orm';
 import { db, schema } from '@/db';
 import { seed } from '@/db/seed';
-import { MUSCLES, SERVICES, ADDONS, PARQ_QUESTIONS, service, addon, todayIso, uid, muscle, scopeSnapshotForCoach, scopeSnapshotForMember } from '@/lib/reference';
+import {
+  MUSCLES, SERVICES, ADDONS, PARQ_QUESTIONS, SITES, service, addon, todayIso, uid, muscle,
+  scopeSnapshotForCoach, scopeSnapshotForMember, scopeSnapshotForManager,
+} from '@/lib/reference';
 import { computeScores, priorityAreas } from '@/lib/scoring';
 import { simulateDeviceRead, fromManualEntry } from '@/lib/adapters/bodymap';
+import { computeFreeSlots } from '@/lib/scheduling';
 
 export const dynamic = 'force-dynamic';
 
-const { coaches, members, flags, assessments, measurements, bookings, sessions, programs, checkins, scoreDays } = schema;
+const {
+  managers, coaches, members, flags, assessments, measurements, bookings, sessions, programs, checkins,
+  scoreDays, shifts,
+} = schema;
 
 /* ---------------------------------------------------------------------------
    Single dispatcher for the whole API.
@@ -64,10 +71,12 @@ async function membersWithScores() {
    already applied client-side (lib/reference.ts), just earlier in the
    pipeline. Still not real authorization: the caller declares its own scope,
    nothing checks they're entitled to it — see docs/adr/0002. */
-async function snapshot(scope?: { kind: 'member' | 'coach'; id: string }) {
-  const [ms, cs, bk, se, pg, ck, sd, asRows, meas] = await Promise.all([
+async function snapshot(scope?: { kind: 'member' | 'coach' | 'manager'; id: string }) {
+  const [ms, cs, mgrs, sh, bk, se, pg, ck, sd, asRows, meas] = await Promise.all([
     membersWithScores(),
     db.select().from(coaches),
+    db.select().from(managers),
+    db.select().from(shifts).orderBy(shifts.date, shifts.startTime),
     db.select().from(bookings).orderBy(bookings.date, bookings.time),
     db.select().from(sessions).orderBy(desc(sessions.completedAt)),
     db.select().from(programs),
@@ -77,14 +86,91 @@ async function snapshot(scope?: { kind: 'member' | 'coach'; id: string }) {
     db.select().from(measurements),
   ]);
   const full = {
-    members: ms, coaches: cs, bookings: bk, sessions: se, programs: pg,
-    checkins: ck, scoreDays: sd, assessments: asRows, measurements: meas,
+    members: ms, coaches: cs, managers: mgrs, shifts: sh, bookings: bk, sessions: se, programs: pg,
+    checkins: ck, scoreDays: sd, assessments: asRows, measurements: meas, sites: SITES,
     reference: { muscles: MUSCLES, services: SERVICES, addons: ADDONS, parqQuestions: PARQ_QUESTIONS },
     serverTime: new Date().toISOString(),
   };
   if (scope?.kind === 'coach') return { ...full, ...scopeSnapshotForCoach(full, scope.id) };
   if (scope?.kind === 'member') return { ...full, ...scopeSnapshotForMember(full, scope.id) };
+  if (scope?.kind === 'manager') {
+    const mgr = mgrs.find((x) => x.id === scope.id);
+    return mgr ? { ...full, ...scopeSnapshotForManager(full, mgr.siteId) } : full;
+  }
   return full;
+}
+
+/** Lightweight roster for the landing page and the top switcher — id/name/
+ * site only, none of the activity history the full snapshot carries. Keeps
+ * those two surfaces fast even as the demo dataset grows (150 members). */
+async function directory() {
+  const [mgrs, cs, ms] = await Promise.all([
+    db.select({ id: managers.id, name: managers.name, siteId: managers.siteId }).from(managers),
+    db.select({ id: coaches.id, name: coaches.name, siteId: coaches.siteId, title: coaches.title }).from(coaches),
+    db.select({ id: members.id, name: members.name, siteId: members.siteId }).from(members).orderBy(members.name),
+  ]);
+  return { sites: SITES, managers: mgrs, coaches: cs, members: ms };
+}
+
+/** Server-side paginated members list — the piece `snapshot()`/
+ * `membersWithScores()` deliberately isn't used for. That path always loads
+ * every member's every measurement/session/programme/flag regardless of
+ * what's displayed; this one does the opposite: LIMIT/OFFSET at the
+ * database for the members table itself, then only fetches related rows
+ * (flags/sessions/programmes/assessments/measurements) for the ~20 member
+ * ids on the current page — never the other 130+. Used by the Admin and
+ * Manager consoles' Members tabs (components/MembersList.tsx), not by the
+ * polled snapshot. */
+async function membersList({ site, q: search, page, pageSize }: {
+  site: string; q: string; page: number; pageSize: number;
+}) {
+  const conditions = [
+    ...(site !== 'all' ? [eq(members.siteId, site)] : []),
+    ...(search ? [ilike(members.name, `%${search}%`)] : []),
+  ];
+  const where = conditions.length ? and(...conditions) : undefined;
+
+  const [{ count }, rows] = await Promise.all([
+    db.select({ count: sql<number>`count(*)::int` }).from(members).where(where).then((r) => r[0]),
+    db.select().from(members).where(where).orderBy(members.name).limit(pageSize).offset((page - 1) * pageSize),
+  ]);
+
+  const ids = rows.map((r) => r.id);
+  if (ids.length === 0) return { members: [], total: count, page, pageSize };
+
+  const [memberFlags, memberSessions, memberPrograms, memberAssessments] = await Promise.all([
+    db.select().from(flags).where(inArray(flags.memberId, ids)),
+    db.select().from(sessions).where(inArray(sessions.memberId, ids)).orderBy(desc(sessions.completedAt)),
+    db.select().from(programs).where(inArray(programs.memberId, ids)),
+    db.select().from(assessments).where(inArray(assessments.memberId, ids)).orderBy(desc(assessments.capturedAt)),
+  ]);
+  const latestAssessmentByMember: Record<string, string> = {};
+  for (const a of memberAssessments) if (!latestAssessmentByMember[a.memberId]) latestAssessmentByMember[a.memberId] = a.id;
+  const latestAssessmentIds = Object.values(latestAssessmentByMember);
+  const memberMeasurements = latestAssessmentIds.length
+    ? await db.select().from(measurements).where(inArray(measurements.assessmentId, latestAssessmentIds))
+    : [];
+
+  const out = rows.map((m) => {
+    const meas = memberMeasurements.filter((x) => x.assessmentId === latestAssessmentByMember[m.id]);
+    const prog = memberPrograms.find((p) => p.memberId === m.id);
+    const recent = memberSessions.find((s) => s.memberId === m.id);
+    const scores = meas.length
+      ? computeScores({
+          measurements: meas, hasWearable: !!m.wearable, streak: m.streak,
+          adherence: prog ? Math.min(prog.completions.length / 6, 1) : 0.5,
+          recentRpe: recent?.rpe ?? 6,
+        })
+      : { flexibility: 0, mobility: 0, recovery: 0 };
+    return {
+      ...m, scores,
+      flagCount: memberFlags.filter((f) => f.memberId === m.id).length,
+      sessionCount: memberSessions.filter((s) => s.memberId === m.id).length,
+      lastSession: recent?.completedAt ?? null,
+    };
+  });
+
+  return { members: out, total: count, page, pageSize };
 }
 
 async function slotsFor(dateStr: string, serviceId: string) {
@@ -136,13 +222,47 @@ async function handle(verb: string, seg: string[], q: URLSearchParams, body: any
   if (verb === 'GET' && p === 'snapshot') {
     const kind = q.get('scope');
     const id = q.get('id');
-    return snapshot(kind === 'member' || kind === 'coach' ? { kind, id: id || '' } : undefined);
+    return snapshot(
+      kind === 'member' || kind === 'coach' || kind === 'manager' ? { kind, id: id || '' } : undefined,
+    );
+  }
+
+  if (verb === 'GET' && p === 'directory') return directory();
+
+  if (verb === 'GET' && p === 'members/list') {
+    return membersList({
+      site: q.get('site') || 'all',
+      q: (q.get('q') || '').trim(),
+      page: Math.max(1, parseInt(q.get('page') || '1', 10) || 1),
+      pageSize: Math.min(50, Math.max(1, parseInt(q.get('pageSize') || '20', 10) || 20)),
+    });
   }
 
   if (verb === 'GET' && p === 'availability') {
     const date = q.get('date') || todayIso();
     const serviceId = q.get('serviceId') || 'st30';
     return { date, serviceId, slots: await slotsFor(date, serviceId) };
+  }
+
+  /* Shift- and overlap-aware slots for one coach on one date — what the
+     manager console's TimeSlotPicker renders. Distinct from the flat
+     /availability above (which is coach-agnostic and ignores shifts) so the
+     existing member self-booking flow is untouched. */
+  if (verb === 'GET' && seg[0] === 'coaches' && seg[2] === 'availability') {
+    const coachId = seg[1];
+    const date = q.get('date') || todayIso();
+    const serviceId = q.get('serviceId') || 'st30';
+    const excludeBookingId = q.get('excludeBookingId') || undefined;
+    const sv = service(serviceId) ?? bad('Unknown service', 404);
+    const [coachShifts, dayBookings] = await Promise.all([
+      db.select().from(shifts).where(and(eq(shifts.coachId, coachId), eq(shifts.date, date))),
+      db.select().from(bookings).where(and(eq(bookings.coachId, coachId), eq(bookings.date, date))),
+    ]);
+    return {
+      slots: computeFreeSlots({
+        shifts: coachShifts, bookings: dayBookings, serviceMins: sv.mins, excludeBookingId,
+      }),
+    };
   }
 
   if (verb === 'GET' && seg[0] === 'members' && seg.length === 2) {
@@ -164,7 +284,7 @@ async function handle(verb: string, seg: string[], q: URLSearchParams, body: any
     const id = uid('m');
     await db.insert(members).values({
       id, name: body.name.trim(), phone: body.phone || '+971 5x xxx xxxx', goal: body.goal || null,
-      persona: 'custom', joinedAt: todayIso(), credits: body.credits ?? 0, streak: 0,
+      persona: 'custom', joinedAt: todayIso(), siteId: body.siteId || 's1', credits: body.credits ?? 0, streak: 0,
       wearable: body.wearable || null, parqCleared: !!body.parqCleared,
       parqAt: body.parqCleared ? todayIso() : null, addedByCoachId: body.coachId || null, isDemo: false,
     } as any);
@@ -178,8 +298,31 @@ async function handle(verb: string, seg: string[], q: URLSearchParams, body: any
     if (!body.name?.trim()) bad('Name is required');
     const id = uid('c');
     const initials = body.name.trim().split(/\s+/).map((x: string) => x[0]).join('').slice(0, 2).toUpperCase();
-    await db.insert(coaches).values({ id, name: body.name.trim(), initials, title: body.title || 'Flexologist', siteId: 's1', isDemo: false } as any);
+    await db.insert(coaches).values({ id, name: body.name.trim(), initials, title: body.title || 'Flexologist', siteId: body.siteId || 's1', isDemo: false } as any);
     return { coachId: id, created: true };
+  }
+
+  if (verb === 'POST' && p === 'managers') {
+    if (!body.name?.trim()) bad('Name is required');
+    const id = uid('mg');
+    const initials = body.name.trim().split(/\s+/).map((x: string) => x[0]).join('').slice(0, 2).toUpperCase();
+    await db.insert(managers).values({ id, name: body.name.trim(), initials, siteId: body.siteId || 's1', isDemo: false } as any);
+    return { managerId: id, created: true };
+  }
+
+  /* --- shifts (manager console) --- */
+  if (verb === 'POST' && p === 'shifts') {
+    if (!body.coachId || !body.date || !body.startTime || !body.endTime) bad('coachId, date, startTime and endTime are required');
+    const id = uid('sft');
+    await db.insert(shifts).values({
+      id, coachId: body.coachId, siteId: body.siteId || 's1', date: body.date,
+      startTime: body.startTime, endTime: body.endTime, createdByManagerId: body.managerId || null, isDemo: false,
+    } as any);
+    return { shiftId: id, created: true };
+  }
+  if (verb === 'DELETE' && seg[0] === 'shifts') {
+    await db.delete(shifts).where(eq(shifts.id, seg[1]));
+    return { removed: seg[1] };
   }
 
   /* Self-service PAR-Q. Deliberate exception to the "a named person clears
@@ -244,17 +387,72 @@ async function handle(verb: string, seg: string[], q: URLSearchParams, body: any
     const addons: string[] = body.addons || [];
     const aed = sv.aed + addons.reduce((s, a) => s + addon(a).aed, 0);
     const id = uid('bk');
-    await db.insert(bookings).values({ id, memberId: m.id, coachId: null, serviceId: sv.id, date: body.date, time: body.time, status: 'requested', addons, aed } as any);
+    await db.insert(bookings).values({ id, memberId: m.id, coachId: null, siteId: m.siteId, serviceId: sv.id, date: body.date, time: body.time, status: 'requested', addons, aed } as any);
     return { booking: { id, status: 'requested', aed }, message: 'Request sent to the studio' };
   }
 
+  /* Manager-entered booking (walk-in / phone) — a coach is picked up front,
+     so this validates against that coach's shifts and existing bookings
+     (lib/scheduling.ts) rather than the flat studio-wide grid /bookings
+     above uses, and lands directly as confirmed. Mirrors the root product's
+     manual booking intake (docs/architecture/overview.md, studio console). */
+  if (verb === 'POST' && p === 'bookings/manual') {
+    const [m] = await db.select().from(members).where(eq(members.id, body.memberId));
+    if (!m) bad('Member not found', 404);
+    if (!m.parqCleared) bad('PAR-Q screening required before booking', 409);
+    if (!body.coachId) bad('coachId is required');
+    const sv = service(body.serviceId) ?? bad('Unknown service', 404);
+    const [coachShifts, dayBookings] = await Promise.all([
+      db.select().from(shifts).where(and(eq(shifts.coachId, body.coachId), eq(shifts.date, body.date))),
+      db.select().from(bookings).where(and(eq(bookings.coachId, body.coachId), eq(bookings.date, body.date))),
+    ]);
+    const slots = computeFreeSlots({ shifts: coachShifts, bookings: dayBookings, serviceMins: sv.mins });
+    if (!slots.find((s) => s.time === body.time)?.available) bad('That coach is not free at that time', 409);
+    const id = uid('bk');
+    await db.insert(bookings).values({
+      id, memberId: m.id, coachId: body.coachId, siteId: m.siteId, serviceId: sv.id,
+      date: body.date, time: body.time, status: 'confirmed', addons: [], aed: sv.aed,
+    } as any);
+    return { booking: { id, status: 'confirmed', aed: sv.aed }, message: 'Booked' };
+  }
+
   if (verb === 'POST' && seg[0] === 'bookings' && seg[2] === 'confirm') {
-    await db.update(bookings).set({ status: 'confirmed', coachId: body.coachId || 'c1' } as any).where(eq(bookings.id, seg[1]));
+    if (!body.coachId) bad('coachId is required');
+    await db.update(bookings).set({ status: 'confirmed', coachId: body.coachId } as any).where(eq(bookings.id, seg[1]));
     return { bookingId: seg[1], status: 'confirmed', notified: ['push', 'whatsapp'] };
   }
   if (verb === 'POST' && seg[0] === 'bookings' && seg[2] === 'decline') {
     await db.update(bookings).set({ status: 'cancelled' } as any).where(eq(bookings.id, seg[1]));
     return { bookingId: seg[1], status: 'cancelled', reason: body.reason || 'Studio unavailable', notified: ['push', 'whatsapp'] };
+  }
+  if (verb === 'POST' && seg[0] === 'bookings' && seg[2] === 'reschedule') {
+    const [bk] = await db.select().from(bookings).where(eq(bookings.id, seg[1]));
+    if (!bk) bad('Booking not found', 404);
+    if (bk.coachId) {
+      const sv = service(bk.serviceId) ?? bad('Unknown service', 404);
+      const [coachShifts, dayBookings] = await Promise.all([
+        db.select().from(shifts).where(and(eq(shifts.coachId, bk.coachId), eq(shifts.date, body.date))),
+        db.select().from(bookings).where(and(eq(bookings.coachId, bk.coachId), eq(bookings.date, body.date))),
+      ]);
+      const slots = computeFreeSlots({ shifts: coachShifts, bookings: dayBookings, serviceMins: sv.mins, excludeBookingId: bk.id });
+      if (!slots.find((s) => s.time === body.time)?.available) bad('That coach is not free at that time', 409);
+    }
+    await db.update(bookings).set({ date: body.date, time: body.time } as any).where(eq(bookings.id, seg[1]));
+    return { bookingId: seg[1], date: body.date, time: body.time };
+  }
+  if (verb === 'POST' && seg[0] === 'bookings' && seg[2] === 'reassign') {
+    const [bk] = await db.select().from(bookings).where(eq(bookings.id, seg[1]));
+    if (!bk) bad('Booking not found', 404);
+    if (!body.coachId) bad('coachId is required');
+    const sv = service(bk.serviceId) ?? bad('Unknown service', 404);
+    const [coachShifts, dayBookings] = await Promise.all([
+      db.select().from(shifts).where(and(eq(shifts.coachId, body.coachId), eq(shifts.date, bk.date))),
+      db.select().from(bookings).where(and(eq(bookings.coachId, body.coachId), eq(bookings.date, bk.date))),
+    ]);
+    const slots = computeFreeSlots({ shifts: coachShifts, bookings: dayBookings, serviceMins: sv.mins, excludeBookingId: bk.id });
+    if (!slots.find((s) => s.time === bk.time)?.available) bad('That coach is not free at that time', 409);
+    await db.update(bookings).set({ coachId: body.coachId } as any).where(eq(bookings.id, seg[1]));
+    return { bookingId: seg[1], coachId: body.coachId };
   }
   if (verb === 'DELETE' && seg[0] === 'bookings') {
     await db.update(bookings).set({ status: 'cancelled' } as any).where(eq(bookings.id, seg[1]));
@@ -266,7 +464,7 @@ async function handle(verb: string, seg: string[], q: URLSearchParams, body: any
     const { measurements: prev } = await latestMeasurements(body.memberId);
     const norm = simulateDeviceRead(prev.length ? prev : null);
     const id = uid('as');
-    await db.insert(assessments).values({ id, memberId: body.memberId, coachId: body.coachId || 'c1', capturedAt: todayIso(), source: norm.source, deviceId: norm.deviceId } as any);
+    await db.insert(assessments).values({ id, memberId: body.memberId, coachId: body.coachId || null, capturedAt: todayIso(), source: norm.source, deviceId: norm.deviceId } as any);
     await db.insert(measurements).values(norm.measurements.map((m) => ({ assessmentId: id, memberId: body.memberId, ...m })) as any);
     await refreshScoreDay(body.memberId);
     return { assessmentId: id, source: 'bodymap', deviceId: norm.deviceId, ingestedVia: 'adapter/bodymap-simulated', measurementCount: norm.measurements.length };
@@ -275,7 +473,7 @@ async function handle(verb: string, seg: string[], q: URLSearchParams, body: any
   if (verb === 'POST' && seg[0] === 'members' && seg[2] === 'assessments') {
     const norm = fromManualEntry(body.measurements);
     const id = uid('as');
-    await db.insert(assessments).values({ id, memberId: seg[1], coachId: body.coachId || 'c1', capturedAt: todayIso(), source: 'manual', deviceId: null } as any);
+    await db.insert(assessments).values({ id, memberId: seg[1], coachId: body.coachId || null, capturedAt: todayIso(), source: 'manual', deviceId: null } as any);
     await db.insert(measurements).values(norm.measurements.map((m) => ({ assessmentId: id, memberId: seg[1], ...m })) as any);
     await refreshScoreDay(seg[1]);
     return { assessmentId: id, source: 'manual', measurementCount: norm.measurements.length };
@@ -286,9 +484,10 @@ async function handle(verb: string, seg: string[], q: URLSearchParams, body: any
     const [m] = await db.select().from(members).where(eq(members.id, body.memberId));
     if (!m) bad('Member not found', 404);
     if (!body.memberSummary?.trim()) bad('A member-facing summary is required', 422);
+    if (!body.coachId) bad('coachId is required');
     const id = uid('se');
     await db.insert(sessions).values({
-      id, memberId: m.id, coachId: body.coachId || 'c1', bookingId: body.bookingId || null,
+      id, memberId: m.id, coachId: body.coachId, bookingId: body.bookingId || null,
       completedAt: todayIso(), mins: body.mins, modalities: body.modalities || [],
       rpe: body.rpe, painBefore: body.painBefore, painAfter: body.painAfter,
       coachNotes: body.coachNotes || null, memberSummary: body.memberSummary,
@@ -302,7 +501,7 @@ async function handle(verb: string, seg: string[], q: URLSearchParams, body: any
   /* --- programmes & check-ins --- */
   if (verb === 'POST' && seg[0] === 'members' && seg[2] === 'programs') {
     const id = uid('pg');
-    await db.insert(programs).values({ id, memberId: seg[1], coachId: body.coachId || 'c1', title: body.title, assignedAt: todayIso(), moves: body.moves || [], completions: [] } as any);
+    await db.insert(programs).values({ id, memberId: seg[1], coachId: body.coachId || null, title: body.title, assignedAt: todayIso(), moves: body.moves || [], completions: [] } as any);
     return { programId: id, notified: ['push'] };
   }
   if (verb === 'POST' && seg[0] === 'programs' && seg[2] === 'complete') {
@@ -324,6 +523,8 @@ async function handle(verb: string, seg: string[], q: URLSearchParams, body: any
     const tables = {
       members: await db.select().from(members),
       coaches: await db.select().from(coaches),
+      managers: await db.select().from(managers),
+      shifts: await db.select().from(shifts).orderBy(desc(shifts.date)),
       bookings: await db.select().from(bookings).orderBy(desc(bookings.createdAt)),
       assessments: await db.select().from(assessments).orderBy(desc(assessments.capturedAt)),
       measurements: (await db.select().from(measurements)).slice(0, 200),

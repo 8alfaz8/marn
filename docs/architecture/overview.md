@@ -22,15 +22,17 @@ point of view until it's rebuilt there against real auth and a real schema.
 | Module | What it does | Code path (under `prototype/`) | Status |
 |---|---|---|---|
 | Member app | Scores/progress, body map, booking, home programme, session history, PAR-Q | `components/Member.tsx`, `components/ParqForm.tsx`, `app/member/page.tsx` | **in progress** — see deviations |
-| Coach console | Floor schedule, request inbox, assessment capture, session logging, flags, programme prescription | `components/Coach.tsx`, `app/coach/page.tsx` | **in progress** — see deviations |
+| Coach console | Request inbox, assessment capture, session logging, flags, programme prescription | `components/Coach.tsx`, `app/coach/page.tsx` | **in progress** — see deviations |
+| Studio manager console | Floor view (day timeline, shift-and-overlap-aware manual booking, reschedule/reassign), shift assignment, request-approval inbox, site-scoped staff/member roster | `components/Manager.tsx`, `app/manager/page.tsx`, `components/DayTimeline.tsx`, `components/TimeSlotPicker.tsx`, `lib/scheduling.ts` | **in progress**, added 2026-08-18 — ported from the root product's studio console (`docs/adr/0005`'s precedent: independently written, not shared code). See deviations and `decisions.md`/`flow.md` |
 | Corporate portal | Employer accounts, pooled credits, aggregate cohort reporting | — | **not started** — no route, no `organisations`/`orgMembers` tables, nothing in the schema |
-| Administration | Studio overview, coach roster, member CRM, service/price/resource management, credit administration with audit trail | `components/Admin.tsx`, `app/admin/page.tsx` | **in progress** — see deviations |
+| Administration | Cross-studio overview (site-filterable), coach roster, member CRM (server-paginated), service/price/resource management, credit administration with audit trail | `components/Admin.tsx`, `app/admin/page.tsx`, `components/MembersList.tsx` | **in progress** — see deviations |
 | Measurement domain | Scoring engine, assessment/measurement capture | `lib/scoring.ts`, `db/schema.ts` (`assessments`, `measurements`), `lib/reference.ts` (`MUSCLES`) | **in progress** — see deviations |
 | BodyMap adapter | Anti-corruption layer between the (unknown) BodyMap device format and the app's canonical measurement shape | `lib/adapters/bodymap.ts` | **in progress**, matches blueprint intent — `fromManualEntry` and the demo `simulateDeviceRead` work; `fromDeviceApi`/`fromExportFile` are stubs, correctly blocked on vendor contact info the team doesn't have yet |
-| Booking & scheduling | Service-based booking, availability, confirm/decline | `app/api/[...path]/route.ts` (`/bookings`, `/availability`), `db/schema.ts` (`bookings`) | **in progress** — see deviations |
+| Booking & scheduling | Service-based booking, availability, confirm/decline, shift-and-overlap-aware manual intake, reschedule/reassign | `app/api/[...path]/route.ts` (`/bookings`, `/bookings/manual`, `/availability`, `/coaches/:id/availability`), `lib/scheduling.ts`, `db/schema.ts` (`bookings`, `shifts`) | **in progress** — see deviations |
 | Credits & payments | Session credit tracking, package purchase, payment processing | `members.credits` (plain integer column) | **not started** for anything the blueprint actually asks for — see deviations |
 | Notifications | Push + WhatsApp booking/session confirmations | — | **not started** — API responses claim `notified: ['push','whatsapp']` but nothing is sent; see deviations |
-| Identity / session | Who's using the app right now | `lib/session.ts`, `app/api/session/route.ts` | **prototype only** — a plain identity cookie, not authentication. See `docs/adr/0002-prototype-auth-gap.md` |
+| Multi-site | Three studios, each with its own manager, coaches, and members | `lib/reference.ts` (`SITES`, static reference data — no `sites` table, see `decisions.md`), `siteId` on `coaches`/`members`/`bookings`, `db/schema.ts` (`managers`, `shifts`) | **in progress**, added 2026-08-18 — no per-site studio hours override yet (one global `STUDIO_HOURS`, matching the root product's own gap) |
+| Identity / session | Who's using the app right now | `lib/session.ts`, `app/api/session/route.ts` | **prototype only** — a plain identity cookie, not authentication; `kind` is now `member \| coach \| manager \| admin`. See `docs/adr/0002-prototype-auth-gap.md` |
 | Design system | MUI theme, tokens | `theme/theme.ts` (root: real brand tokens; `prototype/theme/theme.ts`: prototype's unrelated bone/ink palette), `docs/design/design-system.md` | **root: token layer done** (palette light/dark, Petrona/Figtree typography, shape/radius, focus ring, tabular numerals — sourced from `Marn wellness brand design system/`), **no screens built against it yet**; ambient wash and elevation shadows documented but not encoded (no consuming component). Prototype unchanged. |
 | Hosting / data residency | UAE-region production hosting | — | **not started** — prototype runs on Vercel + Neon, which the blueprint explicitly allows only because it holds no real member data (§8.2) |
 
@@ -137,9 +139,14 @@ Deliberately scoped out of this pass, not silently trimmed:
 - Coach data (bookings, roster) is scoped to the logged-in coach client-side only (`lib/reference.ts`'s `scopeSnapshotForCoach`), not enforced server-side — see `docs/adr/0002-prototype-auth-gap.md`.
 - Programme prescription (§4.2.6) offers one fixed template ("Desk Reset — Block 3"), not a template library.
 
+**Studio manager console**
+- New 2026-08-18, ported from the root product's studio console shape (floor/shift/timeslot management), not a blueprint-named module on its own — the blueprint's staff roles are coach and (per §4.4) administration; "studio manager" as a distinct console is the root product's own addition (`docs/adr/0008-studio-manager-role.md`), brought into the prototype for parity.
+- Shift assignment has no overlap guard against a coach's *other* shifts (only bookings are checked against shift-and-booking overlap) — a manager can double-book a shift; matches the root product's own documented gap.
+- Request approval reuses the coach console's exact `POST /bookings/:id/confirm`/`/decline` endpoints — a manager and a coach approve through the identical write path, not a separate manager-only one.
+
 **Administration**
 - Not a blueprint-named module until §4.4 (marked P2/P3); it was built now, ahead of that sequencing, specifically to give business data somewhere to live once it was pulled out of the coach console.
-- Covers studio overview, roster, and member CRM. Does **not** cover service/price editing, resource/site management, or credit administration with an audit trail — `lib/reference.ts`'s `SERVICES`/`ADDONS` are still static, with a comment noting "becomes admin-editable tables later."
+- Covers a site-filterable cross-studio overview, roster, and member CRM (2026-08-18: added the site filter once a third studio existed). Does **not** cover service/price editing, resource management, or credit administration with an audit trail — `lib/reference.ts`'s `SERVICES`/`ADDONS` are still static, with a comment noting "becomes admin-editable tables later." Studios themselves (`SITES`) are the same kind of static reference data, not yet admin-creatable.
 
 **Measurement domain**
 - The blueprint's §4.1.1 table specifies four composite scores (Flexibility, Mobility, Recovery, **Consistency**). Only three are implemented — `lib/scoring.ts` has no `consistencyScore()`, and `scoreDays` has no `consistency` column.
@@ -156,4 +163,4 @@ Deliberately scoped out of this pass, not silently trimmed:
 **Notifications**
 - `POST /bookings/:id/confirm`, `/decline`, and `/sessions` all return a `notified: ['push', 'whatsapp']` field in the API response, but no push or WhatsApp integration exists anywhere in the codebase — this is simulated for the demo, not a real send. Worth knowing before anyone reads that field as evidence the feature works.
 
-**Not modeled at all yet:** `sites`, `resourceBookings`, `creditLedger`, `consents`, `auditLog`, `friendships`, `milestones`, `organisations`, `orgMembers` — all named in the blueprint's Appendix A "Not yet built" list and still accurate.
+**Not modeled at all yet:** `resourceBookings`, `creditLedger`, `consents`, `auditLog`, `friendships`, `milestones`, `organisations`, `orgMembers` — all named in the blueprint's Appendix A "Not yet built" list and still accurate. (`sites` is now represented, but as the static `SITES` reference constant, not a table — see the Multi-site row above and `decisions.md`'s 2026-08-18 entry.)

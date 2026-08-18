@@ -14,12 +14,43 @@ import { pgTable, text, integer, boolean, timestamp, jsonb, serial, date } from 
       Moving to RDS in me-central-1 is a change of DATABASE_URL.
 --------------------------------------------------------------------------- */
 
+/* Studios are static reference data, not a table — same treatment as
+   SERVICES/MUSCLES in lib/reference.ts ("becomes admin-editable tables
+   later"). See lib/reference.ts's SITES constant. */
+
+/* Studio managers — a separate table from coaches rather than a role column,
+   so the coach-specific scoping helpers in lib/reference.ts don't need to
+   branch on role. One per site in the demo seed, but nothing enforces that. */
+export const managers = pgTable('managers', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  initials: text('initials').notNull(),
+  siteId: text('site_id').default('s1').notNull(),
+  isDemo: boolean('is_demo').default(true).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
 export const coaches = pgTable('coaches', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   initials: text('initials').notNull(),
   title: text('title').default('Flexologist').notNull(),
   siteId: text('site_id').default('s1').notNull(),
+  isDemo: boolean('is_demo').default(true).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+/* Manager-assigned coach shifts — bounds the time-slot picker and the floor
+   timeline. Pure reference rows, no FK constraints (matches this table's
+   existing no-FK convention; see the header note on plain-Postgres intent). */
+export const shifts = pgTable('shifts', {
+  id: text('id').primaryKey(),
+  coachId: text('coach_id').notNull(),
+  siteId: text('site_id').notNull(),
+  date: date('date').notNull(),
+  startTime: text('start_time').notNull(),
+  endTime: text('end_time').notNull(),
+  createdByManagerId: text('created_by_manager_id'),
   isDemo: boolean('is_demo').default(true).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
@@ -32,6 +63,7 @@ export const members = pgTable('members', {
   // persona drives the seeded shape: power | active | new | custom
   persona: text('persona').default('custom').notNull(),
   joinedAt: date('joined_at').notNull(),
+  siteId: text('site_id').default('s1').notNull(),
   credits: integer('credits').default(0).notNull(),
   streak: integer('streak').default(0).notNull(),
   wearable: text('wearable'),
@@ -77,6 +109,7 @@ export const bookings = pgTable('bookings', {
   id: text('id').primaryKey(),
   memberId: text('member_id').notNull(),
   coachId: text('coach_id'),
+  siteId: text('site_id').default('s1').notNull(),
   serviceId: text('service_id').notNull(),
   date: date('date').notNull(),
   time: text('time').notNull(),

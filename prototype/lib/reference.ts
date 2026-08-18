@@ -41,7 +41,19 @@ export const MODALITIES = [
   'Assisted stretch', 'PNF', 'Compression boots', 'Oxygen', 'Trigger point', 'Hydration',
 ];
 
-export const SITE = { id: 's1', name: 'Marn — Business Bay' };
+export type Site = { id: string; name: string; city: string };
+
+export const SITES: Site[] = [
+  { id: 's1', name: 'Marn — Business Bay', city: 'Dubai' },
+  { id: 's2', name: 'Marn — Dubai Marina', city: 'Dubai' },
+  { id: 's3', name: 'Marn — Abu Dhabi Corniche', city: 'Abu Dhabi' },
+];
+export const siteById = (id: string) => SITES.find((s) => s.id === id);
+
+/* Studio operating hours — every site, no per-site override yet (matches
+   the root product's single STUDIO_HOURS constant). Bounds both the
+   time-slot picker and the manager console's overlap guard. */
+export const STUDIO_HOURS = { openMinute: 8 * 60, closeMinute: 22 * 60 };
 
 /* Self-service PAR-Q. A member answers these themselves; a red-flag answer
    blocks booking with a referral message instead of auto-clearing.
@@ -59,12 +71,6 @@ export const PARQ_QUESTIONS: ParqQuestion[] = [
   { key: 'medication', text: 'Are you currently on medication for blood pressure or a heart condition?', redFlag: false },
   { key: 'doctorAdvised', text: 'Has a doctor ever advised you not to exercise?', redFlag: true },
   { key: 'other', text: 'Is there any other reason you should be cautious about starting an activity programme?', redFlag: false },
-];
-
-export const PERSONAS = [
-  { id: 'power',  label: 'Power user',  blurb: 'Nine months in. 48 sessions, wearable linked, the graph tells a story.' },
-  { id: 'active', label: 'Regular',     blurb: 'Four months in. Steady progress, one open safety flag.' },
-  { id: 'new',    label: 'Brand new',   blurb: 'Signed up, never assessed. This is the empty state.' },
 ];
 
 /* Status bands for a ROM measurement as a fraction of target. Legacy
@@ -120,6 +126,31 @@ export function scopeSnapshotForCoach(snap: any, coachId: string) {
     ...snap,
     bookings,
     members,
+    sessions: snap.sessions.filter((s: any) => inScope(s.memberId)),
+    assessments: snap.assessments.filter((a: any) => inScope(a.memberId)),
+    measurements: snap.measurements.filter((x: any) => inScope(x.memberId)),
+    programs: snap.programs.filter((p: any) => inScope(p.memberId)),
+    checkins: snap.checkins.filter((c: any) => inScope(c.memberId)),
+  };
+}
+
+/* Scopes a full snapshot down to one studio: every coach/member/booking/shift
+   at that site, plus the activity rows keyed to those members. Used by the
+   manager console — a manager sees their whole floor, not just people
+   they've personally touched (unlike scopeSnapshotForCoach above). Client-
+   side only, same caveat as the other scope helpers: see
+   docs/adr/0002-prototype-auth-gap.md. */
+export function scopeSnapshotForManager(snap: any, siteId: string) {
+  const coaches = snap.coaches.filter((c: any) => c.siteId === siteId);
+  const members = snap.members.filter((m: any) => m.siteId === siteId);
+  const memberIds = new Set(members.map((m: any) => m.id));
+  const inScope = (memberId: string) => memberIds.has(memberId);
+  return {
+    ...snap,
+    coaches,
+    members,
+    shifts: snap.shifts.filter((s: any) => s.siteId === siteId),
+    bookings: snap.bookings.filter((b: any) => b.siteId === siteId),
     sessions: snap.sessions.filter((s: any) => inScope(s.memberId)),
     assessments: snap.assessments.filter((a: any) => inScope(a.memberId)),
     measurements: snap.measurements.filter((x: any) => inScope(x.memberId)),

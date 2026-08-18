@@ -3,6 +3,7 @@ import type { Metadata, Viewport } from 'next';
 import { AppRouterCacheProvider } from '@mui/material-nextjs/v15-appRouter';
 import { ThemeProvider } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
+import InitColorSchemeScript from '@mui/material/InitColorSchemeScript';
 import { Petrona, Figtree } from 'next/font/google';
 import theme from '@/theme/theme';
 
@@ -16,21 +17,34 @@ export const metadata: Metadata = {
   description: 'Assisted stretching and recovery, tracked in degrees. Member app and coach console.',
 };
 export const viewport: Viewport = {
-  width: 'device-width', initialScale: 1, themeColor: '#0C1210', viewportFit: 'cover',
-  // The app is dark-first by brand design (theme.ts palette.mode is fixed
-  // 'dark'). Without this, phones in system *light* mode could apply a
-  // forced/auto-light heuristic that shifts the hardcoded status-band and
-  // brand hues away from their real values — same class of bug as the
-  // inverse fixed light-only build had, see prototype/decisions.md.
-  colorScheme: 'dark',
+  width: 'device-width', initialScale: 1, themeColor: '#FFFFFF', viewportFit: 'cover',
+  // Light is the default scheme now (dark stays reachable via the toggle in
+  // Chrome.tsx/Gate.tsx) — let mobile browsers render either natively rather
+  // than forcing one, same reasoning as the root product's own `'dark light'`.
+  colorScheme: 'light dark',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" dir="ltr" className={`${petrona.variable} ${figtree.variable}`}>
+    <html
+      lang="en"
+      dir="ltr"
+      className={`${petrona.variable} ${figtree.variable}`}
+      // InitColorSchemeScript sets data-mui-color-scheme after this markup is
+      // sent, which is a real, expected client/server mismatch on this one
+      // attribute — MUI's own docs recommend suppressing it here rather than
+      // treating it as a bug (see the root product's identical setup).
+      suppressHydrationWarning
+    >
       <body>
+        <InitColorSchemeScript attribute="data-mui-color-scheme" defaultMode="light" />
         <AppRouterCacheProvider options={{ enableCssLayer: true }}>
-          <ThemeProvider theme={theme}>
+          {/* defaultMode here is a *separate* prop from InitColorSchemeScript's
+              own defaultMode above — without it, ThemeProvider's runtime mode
+              state defaults to 'system' and overwrites the script's light
+              attribute after hydration, regardless of theme.defaultColorScheme.
+              See theme.ts's header comment / the root product's identical fix. */}
+          <ThemeProvider theme={theme} defaultMode="light">
             <CssBaseline />
             {children}
           </ThemeProvider>

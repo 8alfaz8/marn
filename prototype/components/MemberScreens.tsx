@@ -242,9 +242,9 @@ export function RangeBar({ label, degrees, target }: { label: string; degrees: n
         variant="determinate"
         value={Math.min(score, 100)}
         sx={{
-          height: 8, borderRadius: (t) => t.marn.radius.pill,
+          height: 8, borderRadius: (t) => `${t.marn.radius.pill}px`,
           bgcolor: 'background.raised',
-          '& .MuiLinearProgress-bar': { bgcolor: (t) => t.marn.bands[band], borderRadius: (t) => t.marn.radius.pill },
+          '& .MuiLinearProgress-bar': { bgcolor: (t) => t.marn.bands[band], borderRadius: (t) => `${t.marn.radius.pill}px` },
         }}
       />
     </Box>
@@ -257,11 +257,11 @@ export function MarkerBar({ value, min, max, normalFrom, normalTo, band }: {
 }) {
   const pct = (v: number) => clamp(((v - min) / (max - min)) * 100, 0, 100);
   return (
-    <Box sx={{ position: 'relative', height: 8, borderRadius: (t) => t.marn.radius.pill, bgcolor: 'background.raised', mt: 1 }}>
+    <Box sx={{ position: 'relative', height: 8, borderRadius: (t) => `${t.marn.radius.pill}px`, bgcolor: 'background.raised', mt: 1 }}>
       {normalFrom !== undefined && normalTo !== undefined && (
         <Box sx={{
           position: 'absolute', insetBlock: 0, insetInlineStart: `${pct(normalFrom)}%`,
-          width: `${pct(normalTo) - pct(normalFrom)}%`, bgcolor: 'action.selected', borderRadius: (t) => t.marn.radius.pill,
+          width: `${pct(normalTo) - pct(normalFrom)}%`, bgcolor: 'action.selected', borderRadius: (t) => `${t.marn.radius.pill}px`,
         }} />
       )}
       <Box sx={{
@@ -317,7 +317,7 @@ export function TodayScreen({ snap, memberId, onOpenBody, onOpenBooking, onOpenC
       </Stack>
 
       {focusMeas ? (
-        <Paper variant="outlined" sx={{ p: 3, borderRadius: (t) => t.marn.radius.lg }}>
+        <Paper variant="outlined" sx={{ p: 3, borderRadius: (t) => `${t.marn.radius.lg}px` }}>
           <Stack direction="row" spacing={3} sx={{ alignItems: 'center' }}>
             <Box sx={{ width: 104, flexShrink: 0 }}>
               <Gonio pct={score / 100} size={104} label={focusMeas.degrees} sub="°" color={bandColor(score)} />
@@ -332,7 +332,7 @@ export function TodayScreen({ snap, memberId, onOpenBody, onOpenBooking, onOpenC
           </Stack>
         </Paper>
       ) : (
-        <Paper variant="outlined" sx={{ p: 3, borderRadius: (t) => t.marn.radius.lg }}>
+        <Paper variant="outlined" sx={{ p: 3, borderRadius: (t) => `${t.marn.radius.lg}px` }}>
           <Typography variant="h5">Your first session sets the baseline</Typography>
           <Typography variant="body2" sx={{ color: 'text.secondary', mt: 1 }}>
             A coach measures ten muscle groups in about eight minutes. After that, this ring fills in.
@@ -361,7 +361,7 @@ export function TodayScreen({ snap, memberId, onOpenBody, onOpenBooking, onOpenC
         {next ? (
           <Paper variant="outlined" sx={{ p: 2, mt: 1, display: 'flex', gap: 2, alignItems: 'center' }}>
             <Box sx={{
-              width: 48, height: 48, borderRadius: (t) => t.marn.radius.sm, flexShrink: 0, textAlign: 'center',
+              width: 48, height: 48, borderRadius: (t) => `${t.marn.radius.sm}px`, flexShrink: 0, textAlign: 'center',
               bgcolor: 'background.raised', display: 'flex', flexDirection: 'column', justifyContent: 'center',
             }}>
               <Typography variant="subtitle2" sx={{ lineHeight: 1 }}>{new Date(next.date).getDate()}</Typography>
@@ -449,7 +449,7 @@ export function SessionDetailScreen({ snap, memberId, session, onBack, onOpenMob
       </ToggleButtonGroup>
 
       {filter === 'range' && (
-        <Paper variant="outlined" sx={{ p: 3, borderRadius: (t) => t.marn.radius.lg }}>
+        <Paper variant="outlined" sx={{ p: 3, borderRadius: (t) => `${t.marn.radius.lg}px` }}>
           <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
             <Typography variant="readout" sx={{ fontSize: '2.5rem' }}>
               {top?.degrees ?? '—'}<Typography component="span" variant="readout" sx={{ fontSize: '1.5rem', color: 'primary.main' }}>°</Typography>
@@ -622,7 +622,7 @@ export function SessionReportScreen({ snap, memberId, session, onBack }: { snap:
               <Typography variant="body2" sx={{ width: 82, flexShrink: 0, color: b.pct >= 0.4 ? 'text.primary' : 'text.secondary' }}>
                 {bandLabel(b.band)}
               </Typography>
-              <Box sx={{ flex: 1, height: 14, borderRadius: (t) => t.marn.radius.pill, bgcolor: 'background.raised', overflow: 'hidden' }}>
+              <Box sx={{ flex: 1, height: 14, borderRadius: (t) => `${t.marn.radius.pill}px`, bgcolor: 'background.raised', overflow: 'hidden' }}>
                 <Box sx={{ width: `${b.pct * 100}%`, height: '100%', bgcolor: (t) => t.marn.bands[b.band] }} />
               </Box>
               <Typography variant="body2" sx={{ width: 34, flexShrink: 0, textAlign: 'end' }}>{Math.round(b.pct * 100)}%</Typography>
@@ -680,50 +680,89 @@ export function SessionReportScreen({ snap, memberId, session, onBack }: { snap:
 
 /* ---------- 5. Progress ---------- */
 
+/** Ascending by date — the member's daily/weekly composite score history. */
+function scoreSeriesFor(snap: Snap, memberId: string) {
+  return snap.scoreDays
+    .filter((s: any) => s.memberId === memberId)
+    .sort((a: any, b: any) => String(a.date).localeCompare(String(b.date)));
+}
+
+/** The progress curve is the hero (CLAUDE.md) — this plots Flexibility, the
+ * composite score every assessment feeds, from `scoreDays` (the table built
+ * for exactly this) rather than an arbitrary single muscle's degrees. The
+ * previous version charted whichever joint happened to have the largest raw
+ * gain and labelled it "Twelve weeks" regardless of how far back that joint's
+ * data actually went — often several months for a long-tenured member. This
+ * version's window label matches what's actually plotted. */
 export function ProgressScreen({ snap, memberId }: { snap: Snap; memberId: string }) {
   const theme = useTheme();
-  const series = snap.scoreDays.filter((s: any) => s.memberId === memberId);
+  const series = scoreSeriesFor(snap, memberId);
   const sessions = snap.sessions.filter((s: any) => s.memberId === memberId);
   const gains = jointGains(snap, memberId);
   const fastest = gains.length ? [...gains].sort((a, b) => b.gain - a.gain)[0] : null;
-  const trend = fastest ? jointTrend(snap, memberId, fastest.key) : [];
   const weeks = last12Weeks(sessions);
   const streak = weekStreak(sessions);
   const painChange = avgPainChange(sessions);
+
+  const first = series[0], last = series[series.length - 1];
+  const flexDelta = first && last && first !== last ? last.flexibility - first.flexibility : null;
+  const spanDays = first && last ? (new Date(last.date).getTime() - new Date(first.date).getTime()) / 86_400_000 : 0;
+  const windowLabel = spanDays >= 80 ? 'Twelve weeks' : series.length ? 'Since you joined' : 'Getting started';
 
   const opacityFor = (n: number) => (n === 0 ? undefined : n === 1 ? 0.35 : n === 2 ? 0.55 : n === 3 ? 0.75 : 1);
 
   return (
     <Stack spacing={2.5} sx={{ pt: 1 }}>
       <Box>
-        <Typography variant="overline" sx={{ color: 'text.secondary' }}>Twelve weeks</Typography>
+        <Typography variant="overline" sx={{ color: 'text.secondary' }}>{windowLabel}</Typography>
         <Typography variant="h3" sx={{ mt: 0.5 }}>
-          {fastest ? `${fastest.label} is your fastest gain` : 'Your progress starts here'}
+          {flexDelta !== null ? 'Your flexibility score, over time' : 'Your progress starts here'}
         </Typography>
       </Box>
 
-      <Paper variant="outlined" sx={{ p: 2.5, borderRadius: (t) => t.marn.radius.lg }}>
-        <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
-          <Typography variant="readout" sx={{ fontSize: '2.25rem' }}>
-            {fastest ? signed(fastest.gain) : '—'}<Typography component="span" variant="readout" sx={{ fontSize: '1.25rem', color: 'primary.main' }}>°</Typography>
-          </Typography>
-          {fastest && <Chip size="small" variant="outlined" label={`SINCE ${fmtMonth(fastest.firstDate)}`} />}
+      <Paper variant="outlined" sx={{ p: 2.5, borderRadius: (t) => `${t.marn.radius.lg}px` }}>
+        <Stack direction="row" spacing={3} sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
+          <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
+            <Typography variant="readout" sx={{ fontSize: '2.25rem' }}>
+              {flexDelta !== null ? signed(flexDelta) : '—'}
+            </Typography>
+            {last && <Chip size="small" variant="outlined" label={`NOW ${last.flexibility}`} />}
+          </Stack>
+          {last && (
+            <Stack direction="row" spacing={3}>
+              <Box>
+                <Typography variant="overline" sx={{ color: 'text.secondary', display: 'block' }}>Mobility</Typography>
+                <Typography variant="readout" sx={{ fontSize: '1.25rem' }}>{last.mobility}</Typography>
+              </Box>
+              <Box>
+                <Typography variant="overline" sx={{ color: 'text.secondary', display: 'block' }}>Recovery</Typography>
+                <Typography variant="readout" sx={{ fontSize: '1.25rem' }}>{last.recovery}</Typography>
+              </Box>
+            </Stack>
+          )}
         </Stack>
-        {trend.length > 1 ? (
+        {series.length > 1 ? (
           <LineChart
             height={130}
             margin={{ top: 16, bottom: 24, left: 8, right: 8 }}
-            xAxis={[{ data: trend.map((t) => t.date), scaleType: 'point', valueFormatter: (v: any) => fmtMonth(v) }]}
-            yAxis={[{ min: 0 }]}
+            xAxis={[{ data: series.map((s) => s.date), scaleType: 'point', valueFormatter: (v: any) => fmtMonth(v) }]}
+            yAxis={[{ min: 0, max: 100 }]}
             hideLegend
             grid={{ horizontal: true }}
             series={[{
-              data: trend.map((t) => t.degrees), label: 'Range', showMark: false, curve: 'monotoneX',
+              data: series.map((s) => s.flexibility), label: 'Flexibility', showMark: false, curve: 'monotoneX',
               color: theme.palette.primary.main, area: true,
             }]}
           />
         ) : (
-          <Typography variant="body2" sx={{ color: 'text.secondary', mt: 2 }}>Trend line fills in after your second assessment.</Typography>
+          <Typography variant="body2" sx={{ color: 'text.secondary', mt: 2 }}>
+            Trend line fills in after your second assessment.
+          </Typography>
+        )}
+        {fastest && (
+          <Typography variant="body2" sx={{ color: 'text.secondary', mt: 2 }}>
+            Fastest single-joint gain: <Box component="span" sx={{ color: 'success.main' }}>{fastest.label} {signed(fastest.gain)}°</Box> since {fmtMonth(fastest.firstDate)}.
+          </Typography>
         )}
       </Paper>
 

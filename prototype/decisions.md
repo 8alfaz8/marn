@@ -23,6 +23,220 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-18 — Light/dark toggle (light default, neutral black/white), real loading skeletons, paginated members list
+
+**Change:** Three separate pieces of feedback, addressed together:
+
+1. **Light/dark toggle, light default.** `theme/theme.ts` moved from a single hardcoded dark
+   `palette` to MUI's CSS-variables `colorSchemes` (`{ light: {...}, dark: {...} }`), following the
+   root product's already-proven, already-debugged wiring exactly: `cssVariables:
+   { colorSchemeSelector: 'data-mui-color-scheme' }` (the literal attribute name, not the `'data'`
+   shorthand — root's own documented bug), `defaultColorScheme: 'light'`, and both
+   `InitColorSchemeScript`'s and `ThemeProvider`'s own `defaultMode="light"` in `app/layout.tsx`
+   (three places that must agree, per root's own hard-won note — skipping any one of them lets
+   hydration silently pick a different scheme than the pre-hydration script painted). The light
+   palette is a deliberate departure from the brand handoff's own (warm, tinted) light tokens —
+   explicit direction was white background, text/outlines in neutral grayscale ("shades of
+   black"), brand colour (bronze/deep-green, reusing the root product's own already-contrast-
+   checked light-mode derivations) reserved for what's actually highlighted. `components/premium.tsx`'s
+   new `ThemeToggle` (in Chrome's app bar and Gate's top corner) calls MUI's `useColorScheme()` —
+   persistence is automatic (MUI writes the choice to its own localStorage key), no app state needed.
+2. **Real loading skeletons, not a blank "Loading…" line.** `components/skeletons.tsx` —
+   `GateSkeleton`, `ConsoleSkeleton` (Coach/Manager/Admin shape: header band + tabs + stat row + two
+   cards), `MemberBodySkeleton` (Member.tsx already renders its real Chrome while loading, so only
+   the content area needed a placeholder). Built entirely from MUI's `<Skeleton>` — no custom
+   shimmer CSS.
+3. **Paginated members list, not a full-table fetch.** New `GET /members/list?site&page&pageSize&q`
+   (`app/api/[...path]/route.ts`'s `membersList()`) does `LIMIT`/`OFFSET` on the `members` table
+   itself at the database, then only fetches flags/sessions/programmes/assessments/measurements for
+   the ~20 member ids on the current page — never the other 130. Deliberately separate from
+   `snapshot()`/`membersWithScores()`, which still loads every member's full history on every poll
+   for the consoles that need it (Overview/Roster/Earnings, the member-detail drawer) — this is a
+   second, narrower path for the one screen that was rendering an unbounded table. New shared
+   `components/MembersList.tsx` (search box, debounced 300ms, Previous/Next) used by both Admin's
+   and Manager's Members tabs.
+
+**Chose — a second dedicated endpoint over paginating the existing `snapshot()` payload:**
+**Why:** `snapshot()`'s shape (whole tables, computed once, polled every 12s) is exactly what the
+coach/member/manager consoles want — their own scope, kept warm without a spinner on every tab
+switch. The members *list* wants the opposite: only the current page, fetched fresh per page/
+search change. Bolting pagination onto a payload designed to be complete would have meant either
+sending everything anyway (defeating the point) or turning every console's shared snapshot into a
+paginated one it doesn't need. Two paths, matched to two different access patterns.
+
+**Chose — MembersList as its own mounted component, not a plain render-function:** **Why:**
+Admin.tsx's and Manager.tsx's other panels are plain functions called mid-render (`renderMembers()`
+etc., per CLAUDE.md's "known trap" note on remounting) — but pagination state (`page`, `query`)
+needs real `useState`/`useEffect`, which cannot live inside a function that's only conditionally
+invoked (`{view === 'members' && renderMembers()}`) without breaking the Rules of Hooks. A genuine
+mounted component sidesteps this: its hooks are scoped to its own instance, and mounting fresh each
+time the Members tab is opened is the *wanted* behaviour here (that's what triggers page 1 to load),
+not the trap the "known trap" note warns about (an accidental remount from an unrelated re-render).
+
+**Kept scheme-neutral this pass (documented, not silently skipped):** `bands` (the four status
+colours), `ambientWash` (the tab gradient washes), and a couple of decorative low-alpha brass
+accents (Chrome's logo glow, Gate's hero wash) — all data-viz/decorative accents that read
+reasonably against either background; a per-scheme retune is a follow-up if that stops being true
+in practice, not attempted speculatively here. `components/Panels.tsx`'s debug dock (API log/DB
+browser) stays plain, dark-only CSS as already documented in `app/globals.css` — it predates the
+MUI migration on purpose and is out of scope for a theming pass.
+
+**Verified:** `npx tsc --noEmit` and `npm run build` clean; browser-driven via Playwright —
+confirmed `data-mui-color-scheme="light"` on first load, toggled to dark, reloaded and confirmed
+the choice persisted; confirmed the Gate/Admin skeletons render before their data answers; confirmed
+`GET /members/list` fires with real `page`/`pageSize`/`q` params (checked against the dev server
+log, not just the UI) and that Next/search/pagination all update the table correctly against the
+live 150-member dataset — zero console errors throughout.
+
+---
+
+## 2026-08-18 — Design pass: "boring" MUI defaults replaced with the theme's own premium tokens (+ a real latent radius bug fixed)
+
+**Change:** User feedback: the app felt "too boring" next to references like Cred (bold, glossy,
+confident cards) and Apple Settings (calm grouped lists) — asked for a blend, not fixated on
+palette, applied to the whole prototype. Two layers:
+
+1. **Theme-wide overrides** (`theme/theme.ts`) — `MuiAppBar` now translucent + blurred (glass, not
+   a flat strip); `MuiToggleButtonGroup`/`MuiToggleButton` now render as a pill-track segmented
+   control with a solid selected pill, not bordered buttons in a row; `MuiTabs`/`MuiTab` get a
+   rounded pill indicator instead of MUI's default hairline underline; `MuiMenu`/`MuiPopover` now
+   use the existing `elevation.floating` shadow recipe instead of a flat bordered box. One change
+   per component, inherited everywhere that component is already used — Gate's category/site
+   toggles, Chrome's role switcher, Manager's/Admin's site filters, Member's booking-flow toggles,
+   every dropdown menu and reschedule/reassign popover, all upgraded with zero per-screen work.
+2. **Two new shared primitives** (`components/premium.tsx`) — `PremiumCard` (swaps the flat
+   "resting" Paper default for `theme.marn.elevation.floating`, optional hover-lift) and
+   `GroupedList`/`SettingRow` (Apple-Settings-style inset list row, unused so far but built for
+   the next settings-shaped surface). Threaded through every top-level content card in
+   `Gate.tsx`, `Chrome.tsx`, `Manager.tsx`, `Admin.tsx`, `Coach.tsx`, and `Member.tsx`'s booking
+   list — nested/dense list rows (drawer forms, table rows, the check-in cards inside a panel)
+   deliberately left as flat/bordered, since stacking elevation-on-elevation reads as busy, not
+   premium. Added `Fade` cross-fades on every tab switch (Manager/Coach/Admin/Member).
+
+**Chose — theme-level overrides over per-screen sx props:** **Why:** the same handful of MUI
+components (ToggleButtonGroup, AppBar, Menu) are reused across every console; styling them once
+in the theme is both less code and guarantees consistency, versus hand-tuning the same recipe six
+times and having it drift. Matches CLAUDE.md's "styling only through the theme and sx prop" —
+this *is* that, just at the theme layer instead of the component layer.
+
+**Chose — elevation only on top-level cards, not nested rows:** **Why:** a glossy floating card
+containing another glossy floating card reads as visual noise, not hierarchy. Reserved
+`PremiumCard` for the level a user's eye should land on first; list rows, drawer forms, and table
+cells stay flat so the one elevated card per section still pops.
+
+**Found and fixed — `borderRadius: t.marn.radius.lg` (and `.sm`/`.md`) rendered as ~18x too large
+almost everywhere it was used, including in code that predates this pass** (`MemberScreens.tsx`,
+`Member.tsx`'s body-map card): MUI's `sx` prop multiplies a bare-number `borderRadius` by
+`theme.shape.borderRadius` (18 here) — so `t.marn.radius.lg` (meant as literal `24px`) was
+computing as `432px`, turning rectangular cards into a bulging blob/stadium shape. Caught via
+browser screenshot during this pass's verification, not visible from reading the code. Fixed at
+every call site (5 files) by forcing a CSS-length string — `` `${t.marn.radius.lg}px` `` — which
+`sx` passes through literally instead of multiplying. `theme.ts`'s own `shape.borderRadius` and
+`MuiPaper`'s `styleOverrides.root.borderRadius` were never affected (`styleOverrides` is plain
+CSS-in-JS, not the `sx` multiplier system) — only call sites using `t.marn.radius.X` inside an
+`sx` prop had the bug.
+
+**Verified:** `npx tsc --noEmit` and `npm run build` clean; browser-driven via Playwright across
+Gate, Member (Today + Progress), Manager (Floor/Staff/Requests), Coach, and Admin
+(Overview/Members, both "all studios" and one-site-filtered) — zero console errors, and the
+before/after screenshots confirmed the radius fix (cards read as intentionally rounded rectangles,
+not blobs) alongside the new glass app bar, pill nav, and floating-card treatment.
+
+---
+
+## 2026-08-18 — Prototype grows a third studio-manager surface, multi-site data, and a uniform demo identity model
+
+**Change:** Added `managers` and `shifts` tables plus `siteId` on `coaches`/`members`/`bookings`
+(`db/schema.ts`); a `sites` constant (not a table — see below); a pure `lib/scheduling.ts`
+port from the root product; a new Manager console (`components/Manager.tsx`,
+`app/manager/page.tsx`) with a floor/day-timeline view, shift-and-overlap-aware
+booking intake, shift assignment, and a request-approval inbox; a redesigned
+`Gate.tsx` (category toggle + searchable person `Autocomplete` fed by a new
+lightweight `GET /directory`, plus a separate platform-admin entry point);
+a redesigned `Chrome.tsx` (adds the Manager segment, and a top-bar person
+switcher scoped to the current role, also fed by `/directory`); a rebuilt
+`db/seed.ts` generating 3 studios × (1 manager + 4 coaches + 50 members) with
+weeks of assessment/session/booking/shift history; and a `ProgressScreen`
+rework (`components/MemberScreens.tsx`) that charts the `scoreDays` composite
+trend instead of an arbitrary single joint's degrees.
+
+**Chose — `sites` as a static constant, not a table:** `SITES` lives in
+`lib/reference.ts` next to `SERVICES`/`MUSCLES`, the same "static for now,
+becomes admin-editable later" treatment those already get. **Why:** nothing
+in this pass creates or edits a studio at runtime — a real `sites` table with
+no write path would just be a second source of truth to keep in sync with the
+constant. Reconsider once "create a studio" is an actual admin action.
+
+**Chose — `managers` as its own table, not a `role` column on `coaches`:**
+**Why:** keeps `coaches` (and every existing coach-scoping helper —
+`scopeSnapshotForCoach`, the coach console's roster logic) untouched; a
+studio manager is a different console with different permissions, not a
+coach variant. Costs one more table and one more `POST` endpoint
+(`/managers`), which is cheap next to threading a role branch through code
+that didn't have one.
+
+**Chose — every demo person named `Test User (###)`, one global sequence
+across managers/coaches/members (`db/seed.ts`'s `nextName()`):** **Why:**
+the user's explicit instruction. Data-shape variety (new/active/power member
+tiers, varied session counts, varied shift patterns) is kept in the
+underlying rows, not the names — so the demo still tells a real story
+despite the uniform naming.
+
+**Chose — a lightweight `GET /directory` (id/name/siteId only) instead of
+reusing the full snapshot for the landing page and the top-bar switcher:**
+**Why:** both surfaces need to list *every* person across all three studios
+regardless of the viewer's own scope — the landing page has no scope yet,
+and a coach-scoped snapshot only carries that coach's own roster. Shipping
+every table's full history (150 members' worth of measurements/sessions) to
+populate two id/name dropdowns would be pure waste; `/directory` is the
+existing scoped-snapshot pattern (`lib/store.ts`'s doc comment) taken one
+step further.
+
+**Chose — reschedule/reassign/manual-booking write paths validated against
+`lib/scheduling.ts`'s `computeFreeSlots`, ported near-verbatim from the root
+product, rather than reimplemented:** **Why:** it's pure, has no DB
+dependency, and the root product already exercises this exact logic in
+production-shaped code; porting it keeps the prototype's floor/shift
+behavior consistent with the root product's "real" version rather than
+inventing a second, divergent overlap-guard algorithm. Independently copied,
+not shared as a package — matches `docs/adr/0005`'s precedent for the two
+trees staying independently written.
+
+**Chose — batched bulk inserts in `db:seed` (`insertInBatches`, 300 rows/
+statement) instead of one `db.insert(...).values(bigArray)` per table:**
+**Why:** a single ~8,000-row `measurements` insert failed against Neon's
+HTTP driver with an opaque, message-less `NeonDbError` — almost certainly a
+request-size or parameter-count ceiling on that driver. Batching sidesteps
+it and is strictly safer regardless of the exact cause.
+
+**Hit and worked around — `drizzle-kit push` failing with `column "id" is in
+a primary key`:** this run's `push` tried to drop and recreate the
+auto-generated NOT NULL constraint on every table's primary-key column
+(a Postgres-17/drizzle-kit interaction issue, unrelated to this change's
+actual schema delta) and errored on the very first one. The two lines that
+mattered — `ALTER TABLE members/bookings ADD COLUMN site_id ...` — were
+applied directly, then reconfirmed with `information_schema.columns`. Not
+recorded as an ADR since it's a tooling quirk, not a schema decision — but
+worth knowing before the next `db:push` on this project trips the same way.
+
+**Also fixed in passing (pre-existing, found via browser verification, not
+part of the requested scope but a one-line correction in code this pass was
+already editing):** `Admin.tsx`'s member roster row nested a `<Chip>` inside
+a `<Typography variant="body2">` — a `<div>` inside a `<p>`, invalid HTML,
+throwing a real hydration-mismatch warning in the browser console. Moved the
+Chip to a sibling `<Stack>`, matching the pattern `Coach.tsx`'s equivalent
+row already used correctly.
+
+**Verified:** `npx tsc --noEmit` and `npm run build` clean; schema pushed and
+`db:seed` run against a live Neon database (3 sites, 3 managers, 12 coaches,
+150 members, 1,724 sessions, 777 assessments, 93 bookings, 192 shifts);
+browser-driven via Playwright — landing page search → member → Progress tab
+(both the empty state and a populated composite-score chart), top-switcher
+role change to Coach, full Manager console (Floor/Requests/Staff/Members
+tabs, including a real day-timeline render and a populated request inbox),
+and Admin's site filter (150 → 50 members switching from "All studios" to
+one site) — zero console errors after the Admin.tsx fix above.
+
 ## 2026-08-10 — Body map rebuilt on a ported MIT-licensed SVG dataset, not hand-drawn beziers
 
 **Change:** `components/Viz.tsx`'s `BodyMap` and the new `components/bodyMapData.ts`
