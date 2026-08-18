@@ -38,6 +38,7 @@ export const copy = {
     logSession: 'Log session',
     startScreening: 'Start screening',
     rescreen: 'Re-screen',
+    prescribeProgram: 'Prescribe programme',
     close: 'Close',
   },
 
@@ -93,6 +94,18 @@ export const copy = {
     sleep: 'Sleep',
     pain: 'Reported pain',
     outOf: '/10',
+  },
+
+  program: {
+    heading: 'Prescribe a home programme',
+    hint: 'One standard template — completion feeds their consistency and recovery scores.',
+    prescribe: 'Prescribe this programme',
+    prescribing: 'Saving…',
+    saved: 'Programme prescribed.',
+    failed: 'That could not be saved. Try again.',
+    currentHeading: 'Current programme',
+    currentEmpty: 'No programme prescribed yet.',
+    completions: (n: number) => `${n} completion${n === 1 ? '' : 's'} in the last 28 days`,
   },
 
   sessions: {

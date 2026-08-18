@@ -4,15 +4,18 @@ import { useEffect, useState } from 'react';
 import Box from '@mui/material/Box';
 import Chip from '@mui/material/Chip';
 import Typography from '@mui/material/Typography';
-import { getCoachDayAvailability } from '@/lib/actions/bookings';
-import { copy } from './copy';
 import type { Slot } from '@/lib/scheduling';
 
-/* Replaces a raw <input type="time"> with the coach's actual free slots for
+/* Replaces a raw <input type="time"> with a coach's actual free slots for
    the chosen date+service — shift-aware and overlap-aware (lib/scheduling.ts),
-   so a manager can only ever pick a time that will be accepted. Module-scope
-   per CLAUDE.md's known trap: an inline sub-component here would remount
-   every time its parent (FloorPanel) re-renders and drop the picked time. */
+   so whoever is booking can only ever pick a time the write path would also
+   accept. Shared by the studio manager's booking form and the member
+   self-booking form (docs/adr/0014) — same picker, different `fetchSlots`
+   (getCoachDayAvailability vs. getMemberAvailability), so the two callers'
+   different authorization gates stay in their own server actions rather
+   than being threaded through this component. Module-scope per CLAUDE.md's
+   known trap: an inline sub-component here would remount on every parent
+   re-render and drop the picked time. */
 export default function TimeSlotPicker({
   coachId,
   serviceId,
@@ -20,6 +23,10 @@ export default function TimeSlotPicker({
   value,
   onChange,
   excludeBookingId,
+  fetchSlots,
+  pickCoachFirstLabel,
+  loadingLabel,
+  noSlotsLabel,
 }: {
   coachId: string;
   serviceId: string;
@@ -27,6 +34,10 @@ export default function TimeSlotPicker({
   value: string;
   onChange: (time: string) => void;
   excludeBookingId?: string;
+  fetchSlots: (coachId: string, date: string, serviceId: string, excludeBookingId?: string) => Promise<Slot[]>;
+  pickCoachFirstLabel: string;
+  loadingLabel: string;
+  noSlotsLabel: string;
 }) {
   const [slots, setSlots] = useState<Slot[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -38,7 +49,7 @@ export default function TimeSlotPicker({
     }
     let cancelled = false;
     setLoading(true);
-    getCoachDayAvailability(coachId, date, serviceId, excludeBookingId)
+    fetchSlots(coachId, date, serviceId, excludeBookingId)
       .then((result) => {
         if (!cancelled) setSlots(result);
       })
@@ -51,12 +62,12 @@ export default function TimeSlotPicker({
     return () => {
       cancelled = true;
     };
-  }, [coachId, serviceId, date, excludeBookingId]);
+  }, [coachId, serviceId, date, excludeBookingId, fetchSlots]);
 
   if (!coachId || !serviceId || !date) {
     return (
       <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-        {copy.booking.pickCoachFirst}
+        {pickCoachFirstLabel}
       </Typography>
     );
   }
@@ -64,7 +75,7 @@ export default function TimeSlotPicker({
   if (loading || slots === null) {
     return (
       <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-        {copy.booking.loadingSlots}
+        {loadingLabel}
       </Typography>
     );
   }
@@ -72,7 +83,7 @@ export default function TimeSlotPicker({
   if (slots.length === 0) {
     return (
       <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-        {copy.booking.noSlots}
+        {noSlotsLabel}
       </Typography>
     );
   }

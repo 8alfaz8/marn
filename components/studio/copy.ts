@@ -42,6 +42,8 @@ export const copy = {
     unknownMember: 'Unknown member',
     unknownCoach: 'Unknown coach',
     unassigned: 'Unassigned',
+    approve: 'Approve',
+    approved: 'Booking approved.',
     decline: 'Decline',
     declined: 'Booking declined.',
     reschedule: 'Reschedule',
@@ -181,6 +183,15 @@ export const copy = {
     colService: 'Service',
     colAed: 'AED',
     colStatus: 'Status',
+  },
+
+  credits: {
+    heading: 'Credits',
+    loading: 'Loading balance…',
+    balance: (n: number) => `Balance: ${n} credit${n === 1 ? '' : 's'}`,
+    sell: 'Sell package',
+    sold: 'Package sold — payment collected outside the app.',
+    failed: 'That could not be recorded. Try again.',
   },
 
   memberAccess: {

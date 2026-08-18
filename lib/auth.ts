@@ -1,4 +1,6 @@
 import { betterAuth } from 'better-auth';
+import { bearer } from 'better-auth/plugins';
+import { expo } from '@better-auth/expo';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { db } from '@/db';
 
@@ -25,5 +27,22 @@ export const auth = betterAuth({
      alias and each per-deployment URL alike — needs to pass better-auth's
      origin check. Tighten this to the real domain only once one exists;
      a wildcard this broad has no place in the final config. */
-  trustedOrigins: ['https://marn-*.vercel.app'],
+  trustedOrigins: [
+    'https://marn-*.vercel.app',
+    // The mobile app's custom scheme (native) and its Expo-web dev origin
+    // (verification only, docs/adr/0017) — same instance, additive.
+    'marn://',
+    'http://localhost:8081',
+    'http://localhost:8082',
+  ],
+  /* Additive only — neither plugin changes staff or web-member cookie auth.
+     `expo()` (the official @better-auth/expo companion, docs/adr/0017)
+     recognizes the mobile app's custom URL scheme as a trusted origin;
+     its client-side expoClient() stores the session cookie in
+     expo-secure-store and replays it automatically, same cookie mechanism
+     as the browser, just persisted differently. `bearer()` is kept too —
+     harmless, additive, and useful for hitting app/api/mobile/* routes
+     directly (curl, tests) with a plain Authorization header instead of a
+     cookie jar. */
+  plugins: [bearer(), expo()],
 });

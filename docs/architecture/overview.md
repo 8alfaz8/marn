@@ -73,7 +73,7 @@ fixed (a coach couldn't reach a first-time member to screen them; see
 | Schema | `db/schema.ts`, `db/auth-schema.ts`, `drizzle.config.ts`, `drizzle/0000_loud_namorita.sql`, `drizzle/0001_freezing_groot.sql`, `drizzle/0002_giant_beyonder.sql`, `drizzle/0003_aromatic_la_nuit.sql` | **done and pushed** — 18 tables live in the `marn-root` Neon project (`docs/adr/0007`, `docs/adr/0010`, `docs/adr/0011`, `docs/adr/0012`, `docs/adr/0013`) |
 | Staff auth | `lib/auth.ts`, `app/api/auth/[...all]/route.ts`, `db/seed.ts`, `app/login/page.tsx`, `lib/auth-client.ts` | **done and verified live** — `better-auth` email+password, staff-only identity domain. `db/seed.ts` bootstrapped the first studio manager (`manager@marn.studio`) and optionally a superadmin (`SEED_SUPERADMIN_*` env vars, unset by default); everyone else is created by an authenticated manager (`lib/actions/staff.ts`'s `createStaffAccount`, site-locked) or superadmin (`createStaffAccountForSite`, any site, never role `superadmin`) |
 | Brand theme | `theme/theme.ts`, `app/layout.tsx` | **done, two real bugs fixed 2026-08-11** — `colorSchemeSelector` was set to the `'data'` shorthand (targets a boolean `[data-dark]` attribute) instead of the literal `'data-mui-color-scheme'` `InitColorSchemeScript` actually sets, and `ThemeProvider` was missing its own `defaultMode="dark"` prop (defaults to `'system'`, overwriting the script's attribute post-hydration). Both silently rendered light mode past `tsc`/`build` — only caught by an actual browser check. See `docs/decisions.md` |
-| Authorization layer | `lib/authz.ts` | **done** — `StaffSession` is a discriminated union on `role` (`coach`/`studio_manager` carry a non-null `siteId`, `superadmin` carries `null`); `requireStaff`/`requireCoach`/`requireStudioManager`/`requireSuperadmin`/`requireStudioManagerOrSuperadmin` resolve the better-auth session to a `staff` row and gate by role, each returning a type-narrowed session so existing site-scoped call sites needed no changes. `assertMemberInScope` is the single enforcement point for the coach/manager/superadmin data split; `roleHome(role)` maps a role to its console route. Two resolvers: `getRealStaffSession()` (signed-in human) and `getStaffSession()` (effective identity, impersonation applied) — `docs/adr/0012` |
+| Authorization layer | `lib/authz.ts` | **done** — `StaffSession` is a discriminated union on `role` (`coach`/`studio_manager` carry a non-null `siteId`, `superadmin` carries `null`); `requireStaff`/`requireCoach`/`requireStudioManager`/`requireSuperadmin`/`requireStudioManagerOrSuperadmin` resolve the better-auth session to a `staff` row and gate by role, each returning a type-narrowed session so existing site-scoped call sites needed no changes. `assertMemberInScope` is the single enforcement point for the coach/manager/superadmin data split; `roleHome(role)` maps a role to its console route. Two resolvers: `getRealStaffSession()` (signed-in human) and `getStaffSession()` (effective identity, impersonation applied) — `docs/adr/0012`. `assertMemberInScope`/`getCoachMembers` also grant a coach access to a member they most recently PAR-Q screened, until an ordinary booking/session tie takes over — fixes a real bug where clearing a member locked the clearing coach out of their own panel mid-visit (`docs/decisions.md`, 2026-08-12) |
 | Superadmin impersonation | `lib/actions/impersonation.ts`, `components/ImpersonationSwitcher.tsx`, `components/StaffChrome.tsx` | **done** — "View as" dropdown in the chrome switches the whole console to any active coach/studio manager. httpOnly `marn_act_as` cookie, re-verified against a live superadmin session on every request and worthless without one; only ever narrows access (superadmins aren't impersonable). Persistent banner + one-click exit; each switch audit-logged against the **real** superadmin (`staff_impersonated`). Writes during impersonation are attributed to the borrowed identity — see `docs/adr/0012` for that trade-off and its reversal point |
 | Scheduling math | `lib/scheduling.ts` | **done** — pure functions (`computeFreeSlots`, `rangesOverlap`, `bookingRange`, etc.), no DB access; single source of truth for coach availability, reused by the overlap check, the slot picker, the day timeline, and coach workload. Tested via `scripts/test-scheduling.ts` (plain `assert`-style, run with `npx tsx` — no test-runner dependency added) |
 | BodyMap adapter | `lib/integrations/bodymap/index.ts` | **done**, manual-entry only — `fromDeviceApi`/`fromExportFile` stubbed, matching the prototype's own precedent. Independently written, not a port (`docs/adr/0005`) |
@@ -85,17 +85,81 @@ fixed (a coach couldn't reach a first-time member to screen them; see
 | Scoring engine | `lib/scoring.ts`, `lib/scores.ts` | **done** for Flexibility and Mobility (blueprint §5.4 formulas, unchanged from the prototype's, independently written per `docs/adr/0005`'s precedent); Recovery is real for its `recentRpe` term (latest logged session) but `adherence` and `streak` are hardcoded to `0` — both are home-programme-fed inputs (§4.1.6) and home programmes aren't built at root (Phase 2), so the function doesn't estimate a number it has no real signal for. `hasWearable` is `false` for the same reason as the prototype's own documented placeholder (§4.1.9, Phase 3). Consistency (the blueprint's fourth composite) still isn't implemented, same pre-existing gap as the prototype. Pure functions, no DB/React imports; unit-tested via `scripts/test-scoring.ts` (`npx tsx`, matches `scripts/test-scheduling.ts`'s pattern) |
 | Member portal | `app/m/[token]/page.tsx`, `components/member/*`, `lib/actions/memberPortal.ts`, `lib/actions/memberAccess.ts`, `db/schema.ts` (`memberAccessTokens`) | **done**, read-only — scores, priority areas, a region-grouped range list standing in for "body map" this pass (see deviations below), and session history. No member auth: a staff-issued, revocable link is the sole credential this phase (`docs/adr/0013`). Generated/copied/revoked from the studio console's member detail drawer (`MemberAccessSection` in `MemberDetailDrawer.tsx`) — coach console has no entry point, since coaches don't hold member contact fields to send the link with (`docs/adr/0008`) |
 
+## Phase 2, slice 1 (2026-08-12): member auth + self-service booking
+
+Blueprint Phase 2 (§11) is large — member auth, self-service booking, the
+resource model, payments/credit ledger, notifications, home programmes, a
+mobile app, cancellation policy. This slice covers the two pieces the user
+picked first, after two scope questions resolved with the user and recorded
+in the approved plan and `docs/decisions.md`: booking stays on the existing
+coach+service model (not the full resource model — that's a separably large
+rewrite, still deferred, see below), and self-registration is true
+self-service (no staff step), matching the blueprint's literal exit
+criterion. **Fully browser-verified**, Playwright, throwaway data created
+and deleted for the check — see `docs/decisions.md`'s 2026-08-12 entry for
+exactly what was walked through, including the accepted cross-domain
+session edge case (`docs/adr/0014`) confirmed safe rather than assumed.
+
+| Module | Code path | Status |
+|---|---|---|
+| Member auth | `lib/memberAuth.ts`, `lib/actions/memberAuth.ts`, `app/join/page.tsx`, `app/member/login/page.tsx` | **done, browser-verified** — reuses the staff `better-auth` instance (`docs/adr/0014`), no new plugin or vendor. Self-registration is two steps: `authClient.signUp.email` client-side (so the browser gets the session cookie), then `completeMemberRegistration` (server action) inserts the `members` row against the live session. `members.authUserId` (new, plain unique text column, not a DB FK — same pattern as `staff.authUserId`) and `members.addedByStaffId` (now nullable) distinguish the two ways onto the roster |
+| Self-service booking | `lib/actions/bookings.ts` (`createSelfBooking`, `getMemberAvailability`, `getActiveCoachesAtSite`, `getMemberOwnBookings`, `cancelSelfBooking`, `approveBooking`), `components/member/{BookingForm,MyBookings,MemberConsole}.tsx` | **done, browser-verified** — reuses `lib/scheduling.ts` and the existing overlap guard unchanged; a member picks from the same conflict-free slot set a studio manager would see. Lands as `requested`, not auto-confirmed, per existing precedent already written into `createBooking`'s doc comment; `approveBooking` (new, `declineBooking`'s sibling) is how a studio manager confirms it, wired into `components/studio/FloorPanel.tsx`'s existing `requested`/`confirmed` row actions. `cancelSelfBooking` now enforces the real 24h cancellation policy (below) — the "bare cancel, no policy" note here was accurate on 2026-08-12 morning, superseded the same day |
+| Member home | `app/member/page.tsx`, `components/member/MemberConsole.tsx`, `lib/actions/memberSelf.ts` | **done, browser-verified** — three tabs (Overview/Book/My bookings), all mounted (not conditional render, matching `StudioConsole.tsx`'s own pattern). Overview reuses Phase 1's `MemberPortal.tsx` presentational component unchanged, fed by `getMyPortalData()` instead of the token-based action — same shape, different source. Book tab shows the readiness-pending or referred-to-a-doctor state (`session.referredToDoctor`, new — distinguishes "never screened" from "screened and flagged," both of which read as `parqCleared: false` alone) instead of a dead-end form when unscreened |
+| Shared `TimeSlotPicker` | `components/shared/TimeSlotPicker.tsx` | **done** — generalized from the studio-only version (now deleted, no other references existed) to accept a `fetchSlots` function prop instead of importing a specific server action, so the studio booking form (`getCoachDayAvailability`) and the member booking form (`getMemberAvailability`) share one ~95-line component instead of two near-identical copies |
+
+## Completing Phase 2 (2026-08-12): everything except the resource model
+
+Blueprint Phase 2 is now done at root except the full resource model
+(deliberately deferred — a rewrite of the already-verified booking engine,
+not additive to it, same reasoning as slice 1's scope call). **Fully
+browser-verified**, both trees — see `docs/decisions.md`'s 2026-08-12
+"Completing Phase 2" entry for exactly what was walked through, including
+two real bugs this pass's verification caught and fixed (one cross-platform
+cookie-handling bug in the mobile app, one authorization gap where clearing
+a member's PAR-Q briefly locked their own coach out — same root-cause shape
+as the bug Phase 1's verification caught, a second instance of it).
+
+| Module | Code path | Status |
+|---|---|---|
+| Credit ledger + payments | `db/schema.ts` (`creditLedger`), `lib/integrations/payments/index.ts`, `lib/actions/creditLedger.ts` | **done, browser-verified** — append-only, 8 entry types exactly matching blueprint Appendix D's list, balance always derived (`sum(credits)`), never stored (`docs/adr/0016`). Payment goes through a swappable port (`docs/adr/0015`) — `chargeManual` (implemented, payment collected outside the system) is the only one anything calls; `chargeStripe`/`chargeUaeGateway` are stubs. `purchasePackage` is studio-manager-only, no member self-checkout without a real gateway. Booking writes a `consumption` entry unconditionally but does **not** gate on balance this pass (explicit, user-confirmed trade-off — see `docs/decisions.md`, 2026-08-12 slice-1 entry) |
+| Cancellation policy | `lib/actions/bookings.ts` (`cancelSelfBooking`, `declineBooking`) | **done, browser-verified** — 24h notice: ≥24h before the appointment refunds the consumed credit, <24h forfeits it (no refund entry). The blueprint names this item with zero concrete numbers (confirmed by direct reading, not just under-documented) — 24h was the number chosen, recorded in `docs/adr/0016`. A studio-manager decline always refunds unconditionally regardless of timing — the member didn't cause it |
+| Home programmes + adherence | `db/schema.ts` (`programs`), `lib/actions/programs.ts`, `lib/scoring.ts` (`consistencyScore`), `lib/scores.ts` | **done, browser-verified** — coach prescribes one fixed template (matches the existing single-template precedent for session-programme prescription); member marks days complete, idempotent per day. `consistencyScore()` — the blueprint's fourth composite, previously unimplemented at root — is real now, and `getMemberScores`'s `adherence` stops being a hardcoded `0`. Cadence-per-week is derived from `moves.length` (judgment call, no dedicated cadence field in the blueprint's schema — `docs/decisions.md`) |
+| Pre-session check-in | `lib/actions/checkins.ts`, `components/member/CheckinForm.tsx` | **done, browser-verified** — `checkins` table already existed (Phase 1); this is the first write path to it. Idempotent per day, same app-level pattern as programme completions. Pain areas are a region chip list (Lower/Core/Upper), not an interactive body diagram — matches the same scope call already made and documented for the member portal's body map |
+| Notifications | `db/schema.ts` (`notifications`, new), `lib/integrations/notifications/index.ts` | **done, browser-verified** — swappable port (`docs/adr/0015`), `notifyRecorded` (implemented, writes a row) wired into six trigger points: booking requested/confirmed/declined/cancelled, readiness cleared/referred, welcome. `notifyExpoPush`/`notifyWhatsApp` are stubs. No inbox UI — the table is correctly populated but nothing renders it yet, deliberately, since there's no real channel to make an inbox meaningful |
+| Mobile app | `mobile/` (new Expo/TypeScript workspace), `app/api/mobile/*/route.ts`, `lib/mobileApi.ts`, `middleware.ts` (new), `lib/auth.ts` (`bearer()`/`expo()` plugins) | **done, browser-verified via Expo web** — mirrors the web member console's feature set exactly (sign-in, sign-up, Overview, Book, My bookings, Programme, Check-in), no new business logic, only a new client + a thin REST layer wrapping the same server actions the web app calls (`docs/adr/0017`). **Verification constraint, real not glossed over**: this environment has no Xcode/iOS Simulator/Android SDK — verified via `expo start --web` (Metro bundles clean, screens render and the full auth→booking loop works against the real API) plus `tsc`, not a real device or simulator |
+
+### Phase 2 completion deviations (2026-08-12)
+
+- **Still no resource model.** Booking stays on the coach+service model —
+  same deferral as slice 1, unchanged.
+- **`members.credits` (the old plain integer) is now definitively dead**,
+  superseded by the credit ledger. Left in the schema, not deleted, per
+  CLAUDE.md — mention dead columns, don't drop them on a pass that didn't
+  create them.
+- **No credit-balance gate on booking.** `createSelfBooking` never refuses
+  at zero or negative balance — explicit, user-confirmed scope choice so
+  slice 1's self-booking stayed testable without first requiring a studio
+  manager to grant credits. The natural next step, clearly flagged, not
+  silently deferred.
+- **No notification inbox UI.** The `notifications` table is correct and
+  complete; nothing reads it yet.
+- **Mobile app has no offline support, background sync, or real push
+  registration** — `notifyExpoPush` is still a stub, and none of that was
+  in scope for a first client that mirrors the web console.
+
 ### Root product deviations (2026-08-11)
 
 Deliberately scoped out of this pass, not silently trimmed:
 
 - **Shift-boundedness is a picker-level guarantee, not a server-level one.**
-  `TimeSlotPicker`/`getCoachDayAvailability` only ever offer a coach's
-  assigned-shift times, but `assertNoOverlap` (the actual write-path guard
-  in `createBooking`/`rescheduleBooking`/`reassignCoach`) does not
-  independently re-check the shift — only studio hours and existing-booking
-  overlap. A manager cannot hit this gap through the console; a
-  hand-crafted request could. See `docs/decisions.md`.
+  `TimeSlotPicker`/`getCoachDayAvailability` (and now `getMemberAvailability`,
+  same underlying `computeCoachAvailability` helper) only ever offer a
+  coach's assigned-shift times, but `assertNoOverlap` (the actual write-path
+  guard in `createBooking`/`createSelfBooking`/`rescheduleBooking`/
+  `reassignCoach`) does not independently re-check the shift — only studio
+  hours and existing-booking overlap. Neither a manager nor a member can hit
+  this gap through the console; a hand-crafted request could. See
+  `docs/decisions.md`.
 - **Cash-ledger manual entries are superadmin-only.** `recordCashEntry` is
   `requireSuperadmin`-gated; a studio manager cannot record a walk-in
   payment or refund at their own site without going through a superadmin.
@@ -125,6 +189,37 @@ Deliberately scoped out of this pass, not silently trimmed:
   red-flag distinction); `submitParqScreening` (`lib/actions/parq.ts`) is
   the real path now. Left in place per CLAUDE.md ("mention pre-existing
   dead code, don't delete it") rather than removed as a drive-by cleanup.
+
+### Phase 2, slice 1 deviations (2026-08-12)
+
+Deliberately scoped out of this pass, agreed with the user before building
+(see the approved plan and `docs/decisions.md`), not silently trimmed:
+
+- **Booking still isn't on the resource model** (blueprint §4.1.3). Member
+  self-booking reuses the exact coach+service model Phase 1 built —
+  equipment (compression boots, oxygen chamber, sound room) still isn't
+  independently bookable. This was an explicit scope call: the full
+  resource model means rewriting the overlap guard, slot picker, day
+  timeline, and coach workload across all three staff consoles, which is
+  its own slice, not bundled into "add member self-service."
+- **Cancellation is bare — no policy.** `cancelSelfBooking` has no fee or
+  notice-window logic; a member can cancel anything active, any time. The
+  blueprint's "cancellation policy" item is still unbuilt; this is only
+  the walkable-journey minimum (a member who can book but never cancel is
+  an incomplete journey).
+- **No payments, no credit ledger.** `createSelfBooking`'s `aed` is still
+  a revenue proxy derived from the price list, same as staff-created
+  bookings — nothing is actually charged. Blueprint Phase 2's payments/
+  credit-ledger item is unbuilt.
+- **No notifications.** A member booking, or a manager approving one,
+  sends nothing — no push, no WhatsApp. Same gap Phase 1 already
+  documented for staff-created bookings, now also true of self-bookings.
+- **No home programmes.** `lib/scores.ts`'s Recovery score still can't use
+  real `adherence`/`streak` data — unchanged from the Phase 1 gap.
+- **No mobile app.** Member surfaces are responsive web only.
+- **Phase 1's token-link member portal (`app/m/[token]`) is untouched,
+  not retired.** It's still how a staff-added member (no login) sees their
+  data; real member auth is additive, not a replacement, this pass.
 
 ## Deviations from the blueprint, by module
 

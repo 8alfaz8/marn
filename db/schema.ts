@@ -17,6 +17,20 @@ export const staffRole = pgEnum('staff_role', ['coach', 'studio_manager', 'super
 export const bookingStatus = pgEnum('booking_status', ['requested', 'confirmed', 'declined', 'completed', 'cancelled']);
 export const measurementSource = pgEnum('measurement_source', ['bodymap', 'coach_manual', 'member_report']);
 export const cashLedgerType = pgEnum('cash_ledger_type', ['manual_in', 'manual_out']);
+/* Blueprint §9.4 / Appendix D prompt D3 — the authoritative entry-type
+   list. Balance is derived (sum of signed `credits`), never stored — the
+   blueprint's own warning against a `sessions_remaining` integer. */
+export const creditLedgerType = pgEnum('credit_ledger_type', [
+  'purchase',
+  'consumption',
+  'expiry',
+  'freeze',
+  'unfreeze',
+  'refund',
+  'gift',
+  'corporate_grant',
+]);
+export const notificationChannel = pgEnum('notification_channel', ['push', 'whatsapp']);
 export const auditAction = pgEnum('audit_action', [
   'assessment_created',
   'assessment_amended',
@@ -38,6 +52,9 @@ export const auditAction = pgEnum('audit_action', [
   'staff_impersonated',
   'member_access_link_created',
   'member_access_link_revoked',
+  'credit_purchase_recorded',
+  'credit_adjustment_recorded',
+  'program_prescribed',
 ]);
 
 export const sites = pgTable('sites', {
@@ -64,17 +81,25 @@ export const staff = pgTable('staff', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
-/* Client roster (added by staff — no member self-signup in this slice).
-   Contact fields exist on the row but are access-gated at the query layer,
-   not the schema: a coach's read path never selects phone/email, a studio
+/* Client roster. Two ways onto this table now (blueprint Phase 2,
+   docs/adr/0014): staff-added (`addedByStaffId` set, `authUserId` null,
+   the only path in Phase 1) or self-registered (`authUserId` set,
+   `addedByStaffId` null — no staff intervention, matching the Phase 2 exit
+   criterion). `authUserId` is a plain unique text column, not a DB foreign
+   key — same pattern as `staff.authUserId` below, joined to better-auth's
+   `user` table at the application layer only (db/schema.ts and
+   auth-schema.ts stay independent files; see db/index.ts). Contact fields
+   exist on the row but are access-gated at the query layer, not the
+   schema: a coach's read path never selects phone/email, a studio
    manager's does. See docs/adr/0008. */
 export const members = pgTable('members', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   phone: text('phone').notNull(),
   email: text('email'),
+  authUserId: text('auth_user_id').unique(),
   siteId: text('site_id').notNull().references(() => sites.id),
-  addedByStaffId: text('added_by_staff_id').notNull().references(() => staff.id),
+  addedByStaffId: text('added_by_staff_id').references(() => staff.id),
   parqCleared: boolean('parq_cleared').default(false).notNull(),
   parqAt: timestamp('parq_at'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
@@ -245,4 +270,67 @@ export const memberAccessTokens = pgTable('member_access_tokens', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
   revokedAt: timestamp('revoked_at'),
   revokedByStaffId: text('revoked_by_staff_id').references(() => staff.id),
+});
+
+/* Append-only credit ledger (blueprint §9.4, Appendix D prompt D3) —
+   replaces `members.credits` (the old plain integer, now superseded but
+   left in the schema per CLAUDE.md: mention dead columns, don't drop
+   them). `credits` is signed: positive for purchase/refund/gift/
+   corporate_grant/unfreeze, negative for consumption/expiry/freeze. A
+   member's balance is `sum(credits)`, computed on read
+   (lib/actions/creditLedger.ts), never stored on this or any other row.
+   `recordedByStaffId` is null only for the two entry types a booking
+   writes automatically (consumption, refund) — no staff actor, same
+   reasoning as `members.addedByStaffId` being null for self-registration.
+   `paymentReference` is the swappable payment port's return value
+   (lib/integrations/payments) — never a real charge yet, docs/adr/0015. */
+export const creditLedger = pgTable('credit_ledger', {
+  id: serial('id').primaryKey(),
+  memberId: text('member_id').notNull().references(() => members.id),
+  type: creditLedgerType('type').notNull(),
+  credits: integer('credits').notNull(),
+  note: text('note'),
+  relatedBookingId: text('related_booking_id').references(() => bookings.id),
+  recordedByStaffId: text('recorded_by_staff_id').references(() => staff.id),
+  paymentReference: text('payment_reference'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+/* Coach-prescribed home programme (blueprint §4.1.6). Field names match
+   the blueprint's own data dictionary exactly (`programs`, not
+   `homePrograms`). `moves` is genuinely unstructured (name/description/
+   targetMins per move) — jsonb, matching existing usage precedent
+   elsewhere in this schema. `completions` is an array of ISO date
+   strings, one per day the member marked it done — idempotency (one
+   entry per calendar day) is enforced at the write path
+   (lib/actions/programs.ts), not by a schema constraint, same pattern as
+   checkins' per-day upsert. Feeds `consistencyScore()`/`adherence` in
+   lib/scoring.ts — see docs/decisions.md for the cadence-proxy judgment
+   call, since the blueprint gives no explicit cadence field. */
+export const programs = pgTable('programs', {
+  id: text('id').primaryKey(),
+  memberId: text('member_id').notNull().references(() => members.id),
+  coachId: text('coach_id').notNull().references(() => staff.id),
+  title: text('title').notNull(),
+  moves: jsonb('moves').$type<{ name: string; description: string; targetMins: number }[]>().default([]).notNull(),
+  completions: jsonb('completions').$type<string[]>().default([]).notNull(),
+  assignedAt: timestamp('assigned_at').defaultNow().notNull(),
+});
+
+/* Records of what a real notification integration would have sent
+   (blueprint §9.3 — push via Expo/APNs/FCM, WhatsApp via a business
+   solution provider; both are real vendor decisions, correctly deferred
+   behind lib/integrations/notifications, docs/adr/0015). Not a
+   console.log: the Iron Rule against member identifiers in logs applies
+   here too, so a "recording" implementation needs a real row, not
+   stdout. `payload` is deliberately non-health data only (booking time/
+   service, never pain/measurement/flag content) — enforced by convention
+   at each call site, not by the schema. */
+export const notifications = pgTable('notifications', {
+  id: serial('id').primaryKey(),
+  memberId: text('member_id').notNull().references(() => members.id),
+  template: text('template').notNull(),
+  channel: notificationChannel('channel').notNull(),
+  payload: jsonb('payload').$type<Record<string, unknown>>().default({}).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
 });

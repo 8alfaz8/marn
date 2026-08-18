@@ -15,7 +15,7 @@
 
 export type Measurement = { muscleKey: string; degrees: number; target: number };
 
-export type Scores = { flexibility: number; mobility: number; recovery: number };
+export type Scores = { flexibility: number; mobility: number; recovery: number; consistency: number };
 
 function clamp(n: number, min: number, max: number) {
   return Math.min(max, Math.max(min, n));
@@ -75,17 +75,45 @@ export function recoveryScore(input: {
   );
 }
 
+/**
+ * The blueprint's fourth composite (§4.1.1), previously unimplemented at
+ * root — a known, documented gap until a home programme existed to feed
+ * it (blueprint §4.1.6: "completion feeds the consistency ... score").
+ *
+ * Weekly completions against the programme's prescribed cadence, not
+ * against consecutive days (§4.1.5's explicit safety rule — "rest days do
+ * not break streaks"). The blueprint gives no dedicated cadence field on
+ * `programs`, so `cadencePerWeek` is a judgment call derived from
+ * `moves.length` at the call site (lib/scores.ts) — recorded in
+ * docs/decisions.md, not silently assumed.
+ */
+export function consistencyScore(input: { completions: string[]; cadencePerWeek: number; asOf?: Date }): number {
+  const { completions, cadencePerWeek, asOf = new Date() } = input;
+  if (cadencePerWeek <= 0) return 0;
+
+  const windowDays = 28;
+  const cutoff = new Date(asOf);
+  cutoff.setDate(cutoff.getDate() - windowDays);
+
+  const recent = completions.filter((iso) => new Date(iso) >= cutoff && new Date(iso) <= asOf);
+  const expected = cadencePerWeek * (windowDays / 7);
+  return Math.round(clamp((recent.length / expected) * 100, 0, 100));
+}
+
 export function computeScores(args: {
   measurements: Measurement[];
   adherence: number;
   hasWearable: boolean;
   recentRpe: number;
   streak: number;
+  completions: string[];
+  cadencePerWeek: number;
 }): Scores {
   return {
     flexibility: flexibilityScore(args.measurements),
     mobility: mobilityScore(args.measurements),
     recovery: recoveryScore(args),
+    consistency: consistencyScore(args),
   };
 }
 

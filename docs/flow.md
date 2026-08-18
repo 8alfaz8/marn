@@ -160,3 +160,86 @@ All three call `router.refresh()` on success (via the shared `useFormSubmit`), w
 2. `components/studio/FloorPanel.tsx` `onSubmit()` (components/studio/FloorPanel.tsx:57) — price/duration read from `lib/reference.ts`'s `SERVICES`, never typed →
 3. `lib/actions/bookings.ts` `createBooking()` (lib/actions/bookings.ts:39) — `requireStudioManager()`, `assertMemberInScope()` then refuses if `members.parqCleared` is false (readiness screening flow, above) before `assertNoOverlap`; inserts a `confirmed` booking with a coach already assigned (no separate request-then-approve step in this slice — `docs/decisions.md`, 2026-08-11), writes an audit log row →
 4. `components/studio/primitives.tsx` `useFormSubmit()`'s `run()` shows the success `Snackbar` and calls `router.refresh()`, which re-runs step 1 server-side
+
+## Member: self-registration
+
+**Entry point:** `/join`
+
+**Path:**
+1. `app/join/page.tsx` `JoinPage` `onSubmit` — client calls `authClient.signUp.email({ email, password, name })` (`lib/auth-client.ts`) directly, not a server action, so the browser receives the better-auth session cookie the normal way →
+2. on `onSuccess`, still client-side, calls `completeMemberRegistration({ phone, siteId })` (`lib/actions/memberAuth.ts`) →
+3. `completeMemberRegistration()` — `auth.api.getSession()` reads the now-live session from request headers, inserts a `members` row with `authUserId: session.user.id`, `addedByStaffId: null` (the self-registered counterpart to the studio manager's `createMember`) →
+4. client `router.push('/member')` → `app/member/page.tsx` → `getMemberSession()` (`lib/memberAuth.ts`) resolves the same session to the new `members` row, `getMyPortalData()` (`lib/actions/memberSelf.ts`) loads the (empty, first-run) scores/sessions →
+5. `components/member/MemberConsole.tsx` renders — Book tab shows the readiness-pending state (`session.parqCleared` is `false` for every new member) rather than a booking form, matching `docs/flow.md`'s "Coach: readiness screening" entry's step 0 — this new member is exactly who that unscreened-member-scoping widening exists for.
+
+## Member: self-service booking, through to studio manager approval
+
+**Entry point:** `/member`, "Book" tab (only reachable in form once `parqCleared`)
+
+**Path:**
+1. `components/member/BookingForm.tsx` — service picker (`lib/reference.ts`'s `SERVICES`, price never typed), `getActiveCoachesAtSite()` (`lib/actions/bookings.ts`, `requireMember()`-gated, id/name only) for the coach picker, `components/shared/TimeSlotPicker.tsx` fed `getMemberAvailability` (same `computeCoachAvailability` core `getCoachDayAvailability` uses, just member-authorized and site-locked to the member's own `siteId`) →
+2. submit → `createSelfBooking()` (`lib/actions/bookings.ts`) — `requireMember()`, refuses if `!session.parqCleared` (same message shape as `createBooking`'s), reuses `assertNoOverlap` inside the same transaction that also inserts a `credit_ledger` `consumption` entry (`-1`, unconditional — not balance-gated this pass, `docs/decisions.md` 2026-08-12), inserts with `status: 'requested'` (not auto-confirmed — see `createBooking`'s doc comment, which anticipated this exact path), then `notifyRecorded(..., 'booking_requested', ...)` outside the transaction →
+3. `BookingForm`'s `onBooked` callback → `MemberConsole.tsx`'s `refreshBookings()` → `getMemberOwnBookings()`, "My bookings" tab shows it as "Awaiting confirmation" →
+4. separately, `/studio` Floor tab's existing `requested`/`confirmed` row rendering (`components/studio/FloorPanel.tsx`, unchanged from Phase 1) now shows this row with an **Approve** button (new, only rendered when `status === 'requested'`) alongside the existing Reschedule/Reassign/Decline →
+5. "Approve" → `approveBooking()` (`lib/actions/bookings.ts`) — `requireStudioManager()`, `declineBooking`'s sibling: sets `confirmed`, `approvedByStaffId`/`approvedAt`, `logAudit(..., 'booking_approved', ...)` (same action value `createBooking` already writes) →
+6. member's next `getMemberOwnBookings()` read (tab revisit, or after `cancelSelfBooking` on a different row) shows "Confirmed." `cancelSelfBooking()` is the only other state transition a member can trigger directly — see the cancellation-policy flow below for what it does now.
+
+## Member: cancellation, 24h policy
+
+**Entry point:** `/member`, "My bookings" tab, "Cancel" on an active row
+
+**Path:**
+1. `components/member/MyBookings.tsx`'s client-side `willRefund(date, time)` (mirrors the server's own check, display-only) shows "refunded" or "not refunded" in the confirm dialog *before* the member commits — same hours-until-appointment math on both sides, only the server's copy is authoritative →
+2. confirm → `cancelSelfBooking()` (`lib/actions/bookings.ts`) — `requireMember()`, own booking only, `requested`/`confirmed` → `cancelled`; computes `hoursUntil(booking.date, booking.time)` server-side; inside one transaction, ≥24h inserts a `credit_ledger` `refund` (+1, `relatedBookingId`), <24h inserts nothing (forfeited) →
+3. `notifyRecorded(..., 'booking_cancelled', { refunded })` outside the transaction →
+4. returns `{ refunded }` to the client, which is what step 1's dialog copy is confirming ahead of time, not guessing at →
+5. separately, `declineBooking()` (studio manager, `/studio` Floor tab) does the same lookup-and-refund check unconditionally — a manager declining a self-booking always refunds, regardless of timing, since the member didn't cause it; it only writes a `refund` entry if a `consumption` entry exists for that `relatedBookingId` in the first place (a staff-created booking never wrote one, so declining one of those touches the ledger at all only for self-bookings).
+
+## Coach: PAR-Q clearance keeping the coach's own access (the second scoping bug)
+
+**Entry point:** `/coach`, same member context panel already open after clearing PAR-Q
+
+**Path:**
+1. Coach clears a member via `submitParqScreening()` (existing flow, `docs/flow.md`'s "Coach: readiness screening" entry) — `members.parqCleared` flips to `true` →
+2. `onSaved()` → `CoachConsole.tsx`'s `onChanged()` → re-runs `getMemberContext(memberId)` for the *same* member, in the *same* session, to refresh the panel →
+3. `assertMemberInScope()` (`lib/authz.ts`) — the member is no longer unscreened (step 1), and has no booking/session tie yet, so **without the fix below** this throws `ForbiddenError`, breaking the panel the coach is actively looking at →
+4. the fix: a new check queries the member's most recent `parq_screenings` row; if `staffId` matches the calling coach, access is granted anyway. `getCoachMembers()` (`lib/actions/members.ts`) carries the matching roster-level fix (same "latest screener" lookup) so the member doesn't also vanish from the left-rail list mid-session →
+5. once an ordinary booking or session exists for that coach+member pair, neither branch is needed anymore — the original booking/session check already covers it.
+
+## Coach: prescribe a home programme, member completes it
+
+**Entry point:** `/coach`, member context panel, "Prescribe programme"; `/member`, "Programme" tab
+
+**Path:**
+1. `components/coach/CaptureForms.tsx`'s `PrescribeProgramForm` — one fixed template (`PROGRAM_TEMPLATE`, matches the existing single-template precedent for session programmes) → `prescribeProgram()` (`lib/actions/programs.ts`) — `requireCoach()` + `assertMemberInScope()` (same widened/latest-screener scoping as above), inserts a `programs` row, `logAudit(..., 'program_prescribed', ...)` →
+2. member's `/member` "Programme" tab (`components/member/ProgramTab.tsx`) — `getMyProgram()` (`requireMember()`), shows the moves and a "Mark today complete" button, disabled if today's date is already in `completions` →
+3. tap → `markProgramComplete()` (`lib/actions/programs.ts`) — `requireMember()`, own programme only; appends today's ISO date to `completions` only if not already present (idempotent per day, no unique constraint — app-level check, matches `checkins`' own per-day pattern) →
+4. next `getMemberScores()` read (`lib/scores.ts`) — `cadencePerWeek` derived from `program.moves.length` (judgment call, `docs/decisions.md`), `adherence` computed from completions in the last 28 days ÷ expected, feeding both `recoveryScore` and the now-real `consistencyScore()` (`lib/scoring.ts`) — visible on both the member's own Overview and the coach's "Current programme" section (`components/coach/MemberContextPanel.tsx`'s `ProgramSection`, completions-in-28-days count only, no score shown to the coach).
+
+## Member: pre-session check-in, coach sees it before the visit
+
+**Entry point:** `/member`, "Check-in" tab
+
+**Path:**
+1. `components/member/CheckinForm.tsx` — sleep/pain sliders, a region chip list (Lower/Core/Upper — not an interactive body diagram, same scope call as the member portal's body map), optional note → `submitCheckin()` (`lib/actions/checkins.ts`) — `requireMember()`, looks for an existing `checkins` row for that member `at >=` today's midnight; updates it if found, inserts if not (idempotent per day, no schema constraint) →
+2. `components/coach/MemberContextPanel.tsx`'s existing `CheckinsSection` (built in Phase 1, previously always empty since nothing wrote to `checkins`) now has a real row to show — no new coach-side code needed, only the write path was missing.
+
+## Notification triggers → `notifications` table
+
+**Entry point:** six existing action call sites, no new UI
+
+**Path:**
+1. `lib/integrations/notifications/index.ts`'s `notifyRecorded(input)` — the swappable port's only implemented function (`docs/adr/0015`), a plain `db.insert(schema.notifications)` →
+2. called from, one line each, no shared wrapper: `createSelfBooking`/`approveBooking`/`declineBooking`/`cancelSelfBooking` (`lib/actions/bookings.ts`), `submitParqScreening` (`lib/actions/parq.ts`), `completeMemberRegistration` (`lib/actions/memberAuth.ts`) — each passes a `template` name and a `payload` containing only booking/schedule-shaped data, never PAR-Q answers, measurements, or flag content (the Iron Rule against health data in log-adjacent surfaces applies here by convention at each call site, not a schema constraint) →
+3. nothing reads the table yet — verified directly via the database in this pass, not through a UI, since no inbox exists.
+
+## Mobile: sign-in through to a booking, via the new REST layer
+
+**Entry point:** `mobile/app/sign-in.tsx` (or `sign-up.tsx`, same two-step split as the web `/join` flow)
+
+**Path:**
+1. `mobile/lib/authClient.ts`'s `signIn.email`/`signUp.email` — the same better-auth instance as web (`docs/adr/0014`), now with `bearer()` and `expo()` plugins added (`lib/auth.ts`, `docs/adr/0017`); `expoClient()` stores the session in `expo-secure-store` →
+2. every subsequent call goes through `mobile/lib/api.ts`'s `request()` — platform-branched (found necessary by direct reproduction, not assumed): native attaches the stored session via a manual `Cookie` header (`getCookie()`), web uses `credentials: 'include'` and the browser's own cookie jar, since browsers refuse to let script set a `Cookie` header at all →
+3. `app/api/mobile/*/route.ts` (root Next.js app) — thin wrappers, e.g. `GET /api/mobile/portal` → `getMyPortalData()`, `POST /api/mobile/bookings` → `createSelfBooking()` — same functions the web member console calls, auth resolved from the request's cookie/bearer via `getMemberSession()`/`requireMember()` unchanged →
+4. `middleware.ts` (new, root) adds CORS headers scoped to `/api/mobile/*` and `/api/auth/*` only — needed for the `expo start --web` verification target (a different origin than the Next.js dev server), not for native (no browser, no CORS) or for the existing staff/web-member routes (same-origin, untouched) →
+5. `mobile/app/(app)/book.tsx` — first calls `GET /api/mobile/session` (new route, wraps `getMemberSession()`) to read `parqCleared`/`referredToDoctor` before showing the booking form at all, mirroring `components/member/BookingForm.tsx`'s own gate — a real gap the first verification pass caught (the mobile Book screen initially showed the form unconditionally) and this closes.
