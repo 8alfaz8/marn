@@ -23,9 +23,11 @@ import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import EventOutlinedIcon from '@mui/icons-material/EventOutlined';
 import Button from '@mui/material/Button';
 import { LineChart } from '@mui/x-charts/LineChart';
+import { SparkLineChart } from '@mui/x-charts/SparkLineChart';
 import { useState } from 'react';
 import { Gonio } from './Viz';
 import { MUSCLES, muscle, service, iso, clamp, bandOf, bandColor, bandLabel, type Band } from '@/lib/reference';
+import type { AmbientWashKey } from '@/theme/theme';
 
 /* ---------------------------------------------------------------------------
    The five member-app brand screens (Today, Session detail, Mobility detail,
@@ -184,7 +186,7 @@ function sessionTrace(session: any) {
 
 /* ---------- shared pieces ---------- */
 
-export function AmbientWash({ tab, children }: { tab: 'today' | 'progress' | 'sessions'; children: React.ReactNode }) {
+export function AmbientWash({ tab, children }: { tab: AmbientWashKey; children: React.ReactNode }) {
   const theme = useTheme();
   return (
     <Box
@@ -222,6 +224,37 @@ export function StatTile({ label, value, unit }: { label: string; value: React.R
         {value}{unit && <Typography component="span" variant="readout" sx={{ fontSize: '1rem', color: 'primary.main' }}>{unit}</Typography>}
       </Typography>
       <Typography variant="overline" sx={{ color: 'text.secondary' }}>{label}</Typography>
+    </Paper>
+  );
+}
+
+/** Compact secondary trend card — sparkline + current value + delta, for a
+ * metric that sits below the hero chart (Progress screen's Mobility/Recovery).
+ * `color` should be distinct from the hero chart's colour and from any
+ * sibling TrendCard's colour — see ProgressScreen for the choices and why. */
+function TrendCard({ label, series, color }: { label: string; series: number[]; color: string }) {
+  const last = series[series.length - 1];
+  const delta = series.length > 1 ? last - series[0] : null;
+  return (
+    <Paper variant="outlined" sx={{ p: 2, flex: 1, minWidth: 0 }}>
+      <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <Box>
+          <Typography variant="overline" sx={{ color: 'text.secondary' }}>{label}</Typography>
+          <Typography variant="readout" sx={{ fontSize: '1.5rem', display: 'block' }}>{last ?? '—'}</Typography>
+        </Box>
+        {delta !== null && (
+          <Typography variant="body2" sx={{ color: delta >= 0 ? 'success.main' : 'primary.main' }}>{signed(delta)}</Typography>
+        )}
+      </Stack>
+      {series.length > 1 ? (
+        <Box sx={{ mt: 1 }}>
+          <SparkLineChart data={series} height={40} color={color} curve="monotoneX" />
+        </Box>
+      ) : (
+        <Typography variant="body2" sx={{ color: 'text.secondary', mt: 1 }}>
+          Fills in after your second assessment.
+        </Typography>
+      )}
     </Paper>
   );
 }
@@ -275,9 +308,14 @@ export function MarkerBar({ value, min, max, normalFrom, normalTo, band }: {
 
 /* ---------- 1. Today ---------- */
 
-export function TodayScreen({ snap, memberId, onOpenBody, onOpenBooking, onOpenCheckin, onOpenHome }: {
+/* A visit roughly every 3-4 days keeps range gains from backsliding between
+ * sessions — used only to give the weekly-goal ring below a denominator; not
+ * a member-configurable target yet (no field for it in the schema). */
+const WEEKLY_SESSION_GOAL = 2;
+
+export function TodayScreen({ snap, memberId, onOpenBody, onOpenBooking, onOpenCheckin }: {
   snap: Snap; memberId: string;
-  onOpenBody: () => void; onOpenBooking: () => void; onOpenCheckin: () => void; onOpenHome: () => void;
+  onOpenBody: () => void; onOpenBooking: () => void; onOpenCheckin: () => void;
 }) {
   const me = snap.members.find((m: any) => m.id === memberId);
   const meas = snap.measurements.filter((m: any) => m.assessmentId === me?.latestAssessmentId);
@@ -343,16 +381,22 @@ export function TodayScreen({ snap, memberId, onOpenBody, onOpenBooking, onOpenC
       <Stack direction="row" spacing={2}>
         <StatTile label="Sessions" value={sessions.length} />
         <StatTile label="Pain, avg" value={avgPain ?? '—'} />
-        <Paper variant="outlined" sx={{ p: 2, flex: 1, minWidth: 0 }}>
-          <Stack direction="row" spacing={0.5} sx={{ mb: 0.5 }}>
-            {[0, 1, 2, 3].map((i) => (
-              <Box key={i} sx={{
-                width: 8, height: 8, borderRadius: '50%',
-                bgcolor: i < weekSessions ? 'primary.main' : 'background.raised',
-              }} />
-            ))}
-          </Stack>
-          <Typography variant="overline" sx={{ color: 'text.secondary' }}>This week</Typography>
+        <Paper variant="outlined" sx={{ p: 2, flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 1.5 }}>
+          <Box sx={{ width: 44, flexShrink: 0 }}>
+            <Gonio
+              pct={Math.min(weekSessions / WEEKLY_SESSION_GOAL, 1)}
+              size={44}
+              label={weekSessions}
+              sub=""
+              color={weekSessions >= WEEKLY_SESSION_GOAL ? bandColor(100) : undefined}
+            />
+          </Box>
+          <Box sx={{ minWidth: 0 }}>
+            <Typography variant="subtitle2" sx={{ lineHeight: 1.2 }}>
+              {weekSessions} of {WEEKLY_SESSION_GOAL}
+            </Typography>
+            <Typography variant="overline" sx={{ color: 'text.secondary' }}>Weekly goal</Typography>
+          </Box>
         </Paper>
       </Stack>
 
@@ -382,26 +426,6 @@ export function TodayScreen({ snap, memberId, onOpenBody, onOpenBooking, onOpenC
       <Stack direction="row" spacing={1.5}>
         <Button variant="contained" onClick={onOpenCheckin}>Log today</Button>
         <Button variant="outlined" onClick={onOpenBooking}>Book</Button>
-      </Stack>
-
-      {/* Home programme and the whole-body map are core existing features
-          (blueprint/BodyMap boundary) the 5-screen brand handoff doesn't
-          cover — kept reachable from Today as quick links rather than
-          dropped, since the bottom nav itself narrows to the handoff's
-          three tabs (Today/Progress/Sessions). See prototype/decisions.md. */}
-      <Stack direction="row" spacing={1.5}>
-        <Box onClick={onOpenBody} sx={{ flex: 1, cursor: 'pointer' }}>
-          <Paper variant="outlined" sx={{ p: 2 }}>
-            <Typography variant="subtitle2">Full body map</Typography>
-            <Typography variant="body2" sx={{ color: 'text.secondary' }}>Every group, front and back →</Typography>
-          </Paper>
-        </Box>
-        <Box onClick={onOpenHome} sx={{ flex: 1, cursor: 'pointer' }}>
-          <Paper variant="outlined" sx={{ p: 2 }}>
-            <Typography variant="subtitle2">Home programme</Typography>
-            <Typography variant="body2" sx={{ color: 'text.secondary' }}>Your coach&apos;s prescribed moves →</Typography>
-          </Paper>
-        </Box>
       </Stack>
     </Stack>
   );
@@ -721,31 +745,24 @@ export function ProgressScreen({ snap, memberId }: { snap: Snap; memberId: strin
       </Box>
 
       <Paper variant="outlined" sx={{ p: 2.5, borderRadius: (t) => `${t.marn.radius.lg}px` }}>
-        <Stack direction="row" spacing={3} sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
-          <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
-            <Typography variant="readout" sx={{ fontSize: '2.25rem' }}>
-              {flexDelta !== null ? signed(flexDelta) : '—'}
-            </Typography>
-            {last && <Chip size="small" variant="outlined" label={`NOW ${last.flexibility}`} />}
-          </Stack>
-          {last && (
-            <Stack direction="row" spacing={3}>
-              <Box>
-                <Typography variant="overline" sx={{ color: 'text.secondary', display: 'block' }}>Mobility</Typography>
-                <Typography variant="readout" sx={{ fontSize: '1.25rem' }}>{last.mobility}</Typography>
-              </Box>
-              <Box>
-                <Typography variant="overline" sx={{ color: 'text.secondary', display: 'block' }}>Recovery</Typography>
-                <Typography variant="readout" sx={{ fontSize: '1.25rem' }}>{last.recovery}</Typography>
-              </Box>
-            </Stack>
-          )}
+        <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
+          <Typography variant="readout" sx={{ fontSize: '2.25rem' }}>
+            {flexDelta !== null ? signed(flexDelta) : '—'}
+          </Typography>
+          {last && <Chip size="small" variant="outlined" label={`NOW ${last.flexibility}`} />}
         </Stack>
         {series.length > 1 ? (
           <LineChart
             height={130}
             margin={{ top: 16, bottom: 24, left: 8, right: 8 }}
-            xAxis={[{ data: series.map((s) => s.date), scaleType: 'point', valueFormatter: (v: any) => fmtMonth(v) }]}
+            xAxis={[{
+              data: series.map((s) => s.date), scaleType: 'point',
+              valueFormatter: (v: any) => fmtDate(v),
+              // Weekly data within one month used to repeat the same month
+              // label ("JUN JUN JUN JUN"); day+month formatting plus capping
+              // the number of visible ticks keeps the axis legible.
+              tickLabelInterval: (_v: any, i: number) => i % Math.max(1, Math.ceil(series.length / 6)) === 0,
+            }]}
             yAxis={[{ min: 0, max: 100 }]}
             hideLegend
             grid={{ horizontal: true }}
@@ -765,6 +782,17 @@ export function ProgressScreen({ snap, memberId }: { snap: Snap; memberId: strin
           </Typography>
         )}
       </Paper>
+
+      {/* Mobility and Recovery get their own trend history instead of a flat
+       * "NOW" number — Flexibility stays the hero (unchanged position/
+       * prominence, CLAUDE.md: "the progress curve is the hero"). Colours are
+       * distinct from the hero chart and from each other: secondary (celadon)
+       * for Mobility, the neutral stone band token for Recovery — reused here
+       * purely as a third distinct hue, not as a status/band signal. */}
+      <Stack direction="row" spacing={2}>
+        <TrendCard label="Mobility" series={series.map((s) => s.mobility)} color={theme.palette.secondary.main} />
+        <TrendCard label="Recovery" series={series.map((s) => s.recovery)} color={theme.marn.bands.restricted} />
+      </Stack>
 
       <Stack direction="row" spacing={2}>
         <StatTile label="Sessions logged" value={sessions.length} />
@@ -802,13 +830,40 @@ export function ProgressScreen({ snap, memberId }: { snap: Snap; memberId: strin
 
 /* ---------- Sessions list (entry point for the Sessions tab) ---------- */
 
-export function SessionsListScreen({ snap, memberId, onOpenSession }: { snap: Snap; memberId: string; onOpenSession: (id: string) => void }) {
+/** Product owner order: upcoming booking(s) first, a Book button, then past
+ * sessions below — the earlier version showed only the past-session list. */
+export function SessionsListScreen({ snap, memberId, myBookings, onOpenSession, onOpenBooking }: {
+  snap: Snap; memberId: string; myBookings: any[]; onOpenSession: (id: string) => void; onOpenBooking: () => void;
+}) {
   const sessions = snap.sessions.filter((s: any) => s.memberId === memberId);
   const coach = (id: string) => snap.coaches.find((c: any) => c.id === id)?.name || 'Coach';
+  const upcoming = [...myBookings].sort((a: any, b: any) => (a.date + a.time).localeCompare(b.date + b.time));
 
   return (
     <Stack spacing={1.5} sx={{ pt: 1 }}>
       <Typography variant="h3">Sessions</Typography>
+
+      {upcoming.length > 0 && (
+        <Stack spacing={1.5}>
+          <Typography variant="overline" sx={{ color: 'text.secondary' }}>Upcoming</Typography>
+          {upcoming.map((b: any) => (
+            <Paper key={b.id} variant="outlined" sx={{ p: 2, display: 'flex', gap: 2, alignItems: 'center' }}>
+              <EventOutlinedIcon sx={{ color: 'primary.main' }} />
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Typography variant="subtitle2">{service(b.serviceId).name}</Typography>
+                <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                  {fmtDate(b.date)} · {b.time} · {coach(b.coachId)}
+                </Typography>
+              </Box>
+              <Chip size="small" label={b.status} />
+            </Paper>
+          ))}
+        </Stack>
+      )}
+
+      <Button variant="contained" onClick={onOpenBooking}>Book a session</Button>
+
+      <Typography variant="overline" sx={{ color: 'text.secondary', mt: 1 }}>Past sessions</Typography>
       {sessions.length ? sessions.map((s: any) => (
         <Box key={s.id} onClick={() => onOpenSession(s.id)} sx={{ cursor: 'pointer' }}>
           <Paper variant="outlined" sx={{ p: 2, display: 'flex', gap: 2, alignItems: 'center' }}>

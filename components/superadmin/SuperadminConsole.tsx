@@ -7,6 +7,7 @@ import Tab from '@mui/material/Tab';
 import Tabs from '@mui/material/Tabs';
 import OverviewPanel from './OverviewPanel';
 import StudiosPanel from './StudiosPanel';
+import { stickyBelowTopBarSx, useTopBarOffset } from '@/components/shared/CollapsibleTopBar';
 import { copy } from './copy';
 import type { AllStaff, CashLedger, CoachWorkload, Site, SuperadminDashboard } from './types';
 
@@ -27,10 +28,11 @@ export default function SuperadminConsole({
   staff: AllStaff[];
 }) {
   const [tab, setTab] = useState(0);
+  const topBarOffset = useTopBarOffset();
 
   return (
     <Stack spacing={3}>
-      <Box sx={{ borderBlockEnd: '1px solid', borderColor: 'divider' }}>
+      <Box sx={{ ...stickyBelowTopBarSx(topBarOffset), borderBlockEnd: '1px solid', borderColor: 'divider' }}>
         <Tabs value={tab} onChange={(_, next: number) => setTab(next)} aria-label={copy.tabs.label}>
           <Tab label={copy.tabs.overview} id="superadmin-tab-0" aria-controls="superadmin-panel-0" />
           <Tab label={copy.tabs.studios} id="superadmin-tab-1" aria-controls="superadmin-panel-1" />

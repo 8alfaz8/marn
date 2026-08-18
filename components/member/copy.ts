@@ -80,6 +80,7 @@ export const copy = {
 
   booking: {
     heading: 'Book a session',
+    studio: 'Studio',
     service: 'Service',
     coach: 'Coach',
     date: 'Date',
@@ -96,6 +97,11 @@ export const copy = {
 
   myBookings: {
     heading: 'My bookings',
+    bookAction: 'Book a session',
+    upcomingHeading: 'Upcoming',
+    noUpcoming: 'Nothing booked yet.',
+    pastHeading: 'Past sessions',
+    noPast: 'No past bookings yet.',
     empty: 'No bookings yet. Book your first session above.',
     status: {
       requested: 'Awaiting confirmation',

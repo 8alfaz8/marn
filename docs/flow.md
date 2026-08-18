@@ -77,7 +77,7 @@ it). The mismatch redirect target is `roleHome(session.role)`
 1. `components/studio/MembersPanel.tsx` — `setSelected(member)` on click, renders `MemberDetailDrawer` with that member →
 2. `components/studio/MemberDetailDrawer.tsx` — on open, `Promise.all([getMemberContext(member.id), getMemberBookingHistory(member.id)])` →
 3. `lib/actions/members.ts` `getMemberContext()` — `requireStaff()` + `assertMemberInScope()` (full-detail pass-through for `studio_manager`), returns identity/checkins/sessions/assessments/measurements/flags — same function `components/coach/MemberContextPanel.tsx` calls, role-branched identity →
-4. `lib/actions/bookings.ts` `getMemberBookingHistory()` — `requireStudioManager()` + `assertMemberInScope()`, site-scoped booking rows, newest first →
+4. `lib/actions/bookings.ts` `getMemberBookingHistory()` — `requireStudioManager()` + `assertMemberInScope()`, **not** site-scoped as of `docs/adr/0018` (a member can book at any studio, so filtering to the manager's own site would hide bookings made elsewhere) — every booking row for the member, newest first →
 5. drawer renders four read-only-or-link-management sections: `MemberAccessSection` (module-scope, fetches `getActiveMemberAccessToken()` on open — see the member-portal-access flow below), Measurements, Session history, Booking and charge history.
 
 ## Member portal: staff issues a link, member views it
@@ -147,7 +147,7 @@ All three call `router.refresh()` on success (via the shared `useFormSubmit`), w
 **Path:**
 0. `lib/actions/members.ts` `getCoachMembers()` unions the coach's normally-assigned members with *every not-yet-screened member at the site* — without this branch a first-time member (no booking/session yet, since `createBooking` now refuses unscreened members) would never appear in any coach's roster at all, a deadlock caught via browser-driven verification (`docs/decisions.md`, 2026-08-11) →
 1. `components/coach/CaptureForms.tsx` `ParqScreeningForm` (module-scope, per the known-trap rule — survives the panel's background refresh with answers intact) — checkbox per `lib/reference.ts`'s `PARQ_QUESTIONS`, optional note, calls `submitParqScreening(memberId, answers, note)` →
-2. `lib/actions/parq.ts` `submitParqScreening()` — `requireCoach()` + `assertMemberInScope()` (also widened: an unscreened member is in scope for any coach at the site, not just an assigned one — same fix, `lib/authz.ts`); `redFlag` is `true` if any answer marked `redFlag: true` in `PARQ_QUESTIONS` was checked →
+2. `lib/actions/parq.ts` `submitParqScreening()` — `requireCoach()` + `assertMemberInScope()` (as of `docs/adr/0018`, open roster: any coach can reach any member, so this call no longer depends on the unscreened-member widening that used to live in `assertMemberInScope` itself — `getCoachMembers()`'s own site-scoped unscreened branch, step 0 above, is what still gets a first-timer onto a coach's *roster list*, access itself is unconditional now); `redFlag` is `true` if any answer marked `redFlag: true` in `PARQ_QUESTIONS` was checked →
 3. inserts a `parq_screenings` row (full answers, `redFlag`, note, staff/site attribution), then updates `members.parqCleared`/`parqAt` — `!redFlag`/`now()` if clean, `false`/`null` if red-flagged (a fresh red flag always overwrites a prior clearance) →
 4. `logAudit(..., 'readiness_changed', 'member', memberId)` →
 5. `lib/actions/bookings.ts` `createBooking()` reads `members.parqCleared` (via `assertMemberInScope`'s return) before `assertNoOverlap` — an uncleared member's booking is refused with a plain error, no separate flow. Once cleared, step 0's widened branch no longer applies and the member reverts to ordinary booking/session-tied scoping (confirmed live: the coach's roster dropped the member again immediately after a clean screening, before any booking existed).
@@ -177,8 +177,8 @@ All three call `router.refresh()` on success (via the shared `useFormSubmit`), w
 **Entry point:** `/member`, "Book" tab (only reachable in form once `parqCleared`)
 
 **Path:**
-1. `components/member/BookingForm.tsx` — service picker (`lib/reference.ts`'s `SERVICES`, price never typed), `getActiveCoachesAtSite()` (`lib/actions/bookings.ts`, `requireMember()`-gated, id/name only) for the coach picker, `components/shared/TimeSlotPicker.tsx` fed `getMemberAvailability` (same `computeCoachAvailability` core `getCoachDayAvailability` uses, just member-authorized and site-locked to the member's own `siteId`) →
-2. submit → `createSelfBooking()` (`lib/actions/bookings.ts`) — `requireMember()`, refuses if `!session.parqCleared` (same message shape as `createBooking`'s), reuses `assertNoOverlap` inside the same transaction that also inserts a `credit_ledger` `consumption` entry (`-1`, unconditional — not balance-gated this pass, `docs/decisions.md` 2026-08-12), inserts with `status: 'requested'` (not auto-confirmed — see `createBooking`'s doc comment, which anticipated this exact path), then `notifyRecorded(..., 'booking_requested', ...)` outside the transaction →
+1. `components/member/BookingForm.tsx` — a studio picker (new, `docs/adr/0018` point 2: `getActiveSites()` from `lib/actions/memberAuth.ts`, the same public list `/join` uses) chosen first, then the service picker (`lib/reference.ts`'s `SERVICES`, price never typed) and `getActiveCoachesAtSite(siteId)` (`lib/actions/bookings.ts`, `requireMember()`-gated, id/name only, now keyed to the *chosen* site, not the member's own) for the coach picker, `components/shared/TimeSlotPicker.tsx` fed `getMemberAvailability(coachId, date, serviceId, siteId)` (same `computeCoachAvailability` core `getCoachDayAvailability` uses; `siteId` is caller-supplied and validated by `assertActiveSite()` against the real `sites` table, not derived from `session.siteId` any more) →
+2. submit → `createSelfBooking()` (`lib/actions/bookings.ts`) — `requireMember()`, refuses if `!session.parqCleared` (same message shape as `createBooking`'s), validates the chosen `siteId` via `assertActiveSite()`, reuses `assertNoOverlap` inside the same transaction that also inserts a `credit_ledger` `consumption` entry (`-1`, unconditional — not balance-gated this pass, `docs/decisions.md` 2026-08-12), inserts with `status: 'requested'` and `siteId: input.siteId` (the chosen studio, not `session.siteId` — `docs/adr/0018`) (not auto-confirmed — see `createBooking`'s doc comment, which anticipated this exact path), then `notifyRecorded(..., 'booking_requested', ...)` outside the transaction →
 3. `BookingForm`'s `onBooked` callback → `MemberConsole.tsx`'s `refreshBookings()` → `getMemberOwnBookings()`, "My bookings" tab shows it as "Awaiting confirmation" →
 4. separately, `/studio` Floor tab's existing `requested`/`confirmed` row rendering (`components/studio/FloorPanel.tsx`, unchanged from Phase 1) now shows this row with an **Approve** button (new, only rendered when `status === 'requested'`) alongside the existing Reschedule/Reassign/Decline →
 5. "Approve" → `approveBooking()` (`lib/actions/bookings.ts`) — `requireStudioManager()`, `declineBooking`'s sibling: sets `confirmed`, `approvedByStaffId`/`approvedAt`, `logAudit(..., 'booking_approved', ...)` (same action value `createBooking` already writes) →
@@ -195,16 +195,18 @@ All three call `router.refresh()` on success (via the shared `useFormSubmit`), w
 4. returns `{ refunded }` to the client, which is what step 1's dialog copy is confirming ahead of time, not guessing at →
 5. separately, `declineBooking()` (studio manager, `/studio` Floor tab) does the same lookup-and-refund check unconditionally — a manager declining a self-booking always refunds, regardless of timing, since the member didn't cause it; it only writes a `refund` entry if a `consumption` entry exists for that `relatedBookingId` in the first place (a staff-created booking never wrote one, so declining one of those touches the ledger at all only for self-bookings).
 
-## Coach: PAR-Q clearance keeping the coach's own access (the second scoping bug)
+## Coach: PAR-Q clearance keeping the coach's own access (retired by open roster)
 
-**Entry point:** `/coach`, same member context panel already open after clearing PAR-Q
-
-**Path:**
-1. Coach clears a member via `submitParqScreening()` (existing flow, `docs/flow.md`'s "Coach: readiness screening" entry) — `members.parqCleared` flips to `true` →
-2. `onSaved()` → `CoachConsole.tsx`'s `onChanged()` → re-runs `getMemberContext(memberId)` for the *same* member, in the *same* session, to refresh the panel →
-3. `assertMemberInScope()` (`lib/authz.ts`) — the member is no longer unscreened (step 1), and has no booking/session tie yet, so **without the fix below** this throws `ForbiddenError`, breaking the panel the coach is actively looking at →
-4. the fix: a new check queries the member's most recent `parq_screenings` row; if `staffId` matches the calling coach, access is granted anyway. `getCoachMembers()` (`lib/actions/members.ts`) carries the matching roster-level fix (same "latest screener" lookup) so the member doesn't also vanish from the left-rail list mid-session →
-5. once an ordinary booking or session exists for that coach+member pair, neither branch is needed anymore — the original booking/session check already covers it.
+**Status as of `docs/adr/0018` (2026-08-19): this flow's fix no longer exists in the code.**
+`assertMemberInScope()` dropped all per-coach narrowing (open roster — any
+coach can open any member's record, unconditionally), so "does clearing a
+member lock the clearing coach out of their own panel" is no longer a
+question the access-check code can even ask. Kept here, not deleted, as the
+historical record of a real bug (`docs/decisions.md`, 2026-08-12) — the
+matching roster-level fix this entry used to reference still lives on in
+`getCoachMembers()`'s "screened-by-me" branch (see the "Coach: readiness
+screening" entry, step 0), since a roster *listing* default is a UX concern
+`assertMemberInScope`'s removal didn't touch.
 
 ## Coach: prescribe a home programme, member completes it
 

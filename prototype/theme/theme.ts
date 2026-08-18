@@ -107,9 +107,16 @@ export type Band = keyof typeof bands;
 const errorColor = '#B9573E';
 const errorColorLight = '#A34A34';
 
-/** Ambient wash — one soft leak of colour from the top edge per tab, cross-faded on tab change.
- * Kept scheme-invariant (low-alpha accent over whichever background is active) — same reasoning as `bands`. */
-export const ambientWash: Record<'today' | 'progress' | 'sessions', string> = {
+/** Ambient wash — one soft leak of colour from the top edge per surface, cross-faded on change.
+ * Kept scheme-invariant (low-alpha accent over whichever background is active) — same reasoning as `bands`.
+ * Covers the member app's five tabs (today/progress/sessions/body/home) plus one entry per staff
+ * console (manager/coach/admin) — CLAUDE.md's "leaks till middle of page" treatment applied everywhere,
+ * not just Member. Staff consoles use a lower alpha than the member tabs: they're dense data screens,
+ * not a hero moment, so the wash should be felt rather than seen. */
+export const ambientWash: Record<
+  'today' | 'progress' | 'sessions' | 'body' | 'home' | 'manager' | 'coach' | 'admin',
+  string
+> = {
   today:
     'radial-gradient(130% 44% at 18% -8%, rgba(200,164,106,.20) 0%, rgba(200,164,106,0) 62%), ' +
     'radial-gradient(95% 30% at 92% 0%, rgba(143,203,184,.10) 0%, rgba(143,203,184,0) 66%)',
@@ -119,7 +126,24 @@ export const ambientWash: Record<'today' | 'progress' | 'sessions', string> = {
   sessions:
     'radial-gradient(130% 44% at 22% -8%, rgba(111,169,141,.18) 0%, rgba(111,169,141,0) 62%), ' +
     'radial-gradient(95% 30% at 95% 0%, rgba(200,164,106,.10) 0%, rgba(200,164,106,0) 66%)',
+  body:
+    'radial-gradient(130% 44% at 16% -8%, rgba(200,164,106,.16) 0%, rgba(200,164,106,0) 62%), ' +
+    'radial-gradient(95% 30% at 90% 0%, rgba(111,169,141,.12) 0%, rgba(111,169,141,0) 66%)',
+  home:
+    'radial-gradient(130% 44% at 24% -8%, rgba(111,169,141,.20) 0%, rgba(111,169,141,0) 62%), ' +
+    'radial-gradient(95% 30% at 95% 0%, rgba(200,164,106,.10) 0%, rgba(200,164,106,0) 66%)',
+  manager:
+    'radial-gradient(120% 38% at 15% -10%, rgba(143,203,184,.14) 0%, rgba(143,203,184,0) 60%), ' +
+    'radial-gradient(90% 26% at 92% 0%, rgba(200,164,106,.08) 0%, rgba(200,164,106,0) 64%)',
+  coach:
+    'radial-gradient(120% 38% at 15% -10%, rgba(200,164,106,.14) 0%, rgba(200,164,106,0) 60%), ' +
+    'radial-gradient(90% 26% at 92% 0%, rgba(143,203,184,.08) 0%, rgba(143,203,184,0) 64%)',
+  admin:
+    'radial-gradient(120% 38% at 15% -10%, rgba(111,169,141,.12) 0%, rgba(111,169,141,0) 60%), ' +
+    'radial-gradient(90% 26% at 92% 0%, rgba(200,164,106,.08) 0%, rgba(200,164,106,0) 64%)',
 };
+
+export type AmbientWashKey = keyof typeof ambientWash;
 
 export const radiusScale = { sm: 12, md: 18, lg: 24, pill: 999 } as const;
 

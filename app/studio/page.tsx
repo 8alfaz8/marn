@@ -5,7 +5,7 @@ import { copy } from '@/components/studio/copy';
 import { getStaffSession, roleHome } from '@/lib/authz';
 import { getManagerDashboard } from '@/lib/actions/dashboard';
 import { getManagerMembers } from '@/lib/actions/members';
-import { getCoaches, getStaffRoster } from '@/lib/actions/staff';
+import { getCoaches, getSites, getStaffRoster } from '@/lib/actions/staff';
 import { getUpcomingShifts } from '@/lib/actions/shifts';
 import { getImpersonationContext } from '@/lib/actions/impersonation';
 
@@ -22,12 +22,13 @@ export default async function StudioPage() {
   if (!session) redirect('/login');
   if (session.role !== 'studio_manager') redirect(roleHome(session.role));
 
-  const [dashboard, members, staff, coaches, shifts, impersonation] = await Promise.all([
+  const [dashboard, members, staff, coaches, shifts, sites, impersonation] = await Promise.all([
     getManagerDashboard(),
     getManagerMembers(),
     getStaffRoster(),
     getCoaches(),
     getUpcomingShifts(),
+    getSites(),
     getImpersonationContext(),
   ]);
 
@@ -39,6 +40,8 @@ export default async function StudioPage() {
         staff={staff}
         coaches={coaches}
         shifts={shifts}
+        sites={sites}
+        ownSiteId={session.siteId}
       />
     </StaffChrome>
   );

@@ -4,7 +4,7 @@ import { randomUUID } from 'crypto';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '@/db';
 import { auth } from '@/lib/auth';
-import { requireStudioManager, requireSuperadmin } from '@/lib/authz';
+import { requireStaff, requireStudioManager, requireSuperadmin } from '@/lib/authz';
 import { logAudit } from '@/lib/audit';
 
 /** The only way a coach or studio-manager account gets created after the
@@ -44,8 +44,12 @@ export async function getCoaches() {
 
 /* --- Superadmin: studios and cross-site staff (docs/adr/0011) --- */
 
+/** Every site — id/name/city only, no financial or staffing detail. Any
+ *  active staff member can read this (not superadmin-only): the studio
+ *  manager console's roster site-filter (`docs/adr/0018` point 5) needs it
+ *  too, and a site's name/city carries nothing sensitive to gate further. */
 export async function getSites() {
-  await requireSuperadmin();
+  await requireStaff();
   return db.select().from(schema.sites).orderBy(schema.sites.name);
 }
 

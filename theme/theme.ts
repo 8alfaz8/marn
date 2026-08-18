@@ -16,7 +16,32 @@ import { createTheme } from '@mui/material/styles';
  * the start rather than retrofitting later.
  */
 
+/** Ambient wash — one soft leak of colour from the top edge, per
+ *  `docs/design/design-system.md`'s "Ambient wash" section and the brand
+ *  handoff's exact gradient values (`Marn wellness brand design system/
+ *  design_handoff_marn_app/README.md`). Scheme-invariant (low-alpha accent
+ *  over whichever background is active), same reasoning as `band` above —
+ *  matches the prototype's own `theme.marn.ambientWash` naming
+ *  (`prototype/theme/theme.ts`) for parity between the two trees. */
+export const ambientWash = {
+  brass:
+    'radial-gradient(130% 44% at 18% -8%, rgba(200,164,106,.20) 0%, rgba(200,164,106,0) 62%), ' +
+    'radial-gradient(95% 30% at 92% 0%, rgba(143,203,184,.10) 0%, rgba(143,203,184,0) 66%)',
+  celadon:
+    'radial-gradient(130% 44% at 20% -8%, rgba(143,203,184,.20) 0%, rgba(143,203,184,0) 62%), ' +
+    'radial-gradient(95% 30% at 95% 0%, rgba(200,164,106,.10) 0%, rgba(200,164,106,0) 66%)',
+  jade:
+    'radial-gradient(130% 44% at 22% -8%, rgba(111,169,141,.18) 0%, rgba(111,169,141,0) 62%), ' +
+    'radial-gradient(95% 30% at 95% 0%, rgba(200,164,106,.10) 0%, rgba(200,164,106,0) 66%)',
+} as const;
+
 declare module '@mui/material/styles' {
+  interface Theme {
+    marn: { ambientWash: typeof ambientWash };
+  }
+  interface ThemeOptions {
+    marn?: { ambientWash: typeof ambientWash };
+  }
   interface Palette {
     surfaceRaised: string;
     lineStrong: string;
@@ -50,6 +75,7 @@ const theme = createTheme({
   cssVariables: { colorSchemeSelector: 'data-mui-color-scheme' },
   defaultColorScheme: 'dark',
   direction: 'ltr',
+  marn: { ambientWash },
   shape: { borderRadius: radii.md },
   colorSchemes: {
     dark: {

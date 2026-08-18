@@ -17,6 +17,7 @@ import TableRow from '@mui/material/TableRow';
 import TextField from '@mui/material/TextField';
 import { createStaffAccount } from '@/lib/actions/staff';
 import { assignShift } from '@/lib/actions/shifts';
+import CoachSessionHistoryDialog from '@/components/shared/CoachSessionHistoryDialog';
 import { copy } from './copy';
 import { EmptyState, SectionCard, formatDay, useFormSubmit } from './primitives';
 import type { Shift, StaffMember } from './types';
@@ -44,6 +45,7 @@ export default function StaffPanel({ staff, shifts }: { staff: StaffMember[]; sh
   // createStaffAccount is studio-manager-gated and site-scoped — this form
   // deliberately never offers 'superadmin'.
   const [role, setRole] = useState<'coach' | 'studio_manager'>('coach');
+  const [selectedCoach, setSelectedCoach] = useState<{ id: string; name: string } | null>(null);
 
   const staffNames = new Map(staff.map((s) => [s.id, s.name]));
   const assignable = staff.filter((s) => s.active);
@@ -99,7 +101,12 @@ export default function StaffPanel({ staff, shifts }: { staff: StaffMember[]; sh
                     </TableHead>
                     <TableBody>
                       {staff.map((s) => (
-                        <TableRow key={s.id} hover>
+                        <TableRow
+                          key={s.id}
+                          hover
+                          onClick={() => s.role === 'coach' && setSelectedCoach({ id: s.id, name: s.name })}
+                          sx={{ cursor: s.role === 'coach' ? 'pointer' : 'default' }}
+                        >
                           <TableCell>{s.name}</TableCell>
                           <TableCell>{ROLE_LABEL[s.role]}</TableCell>
                           <TableCell>
@@ -256,6 +263,11 @@ export default function StaffPanel({ staff, shifts }: { staff: StaffMember[]; sh
         autoHideDuration={4000}
         onClose={() => setNotice(null)}
         message={notice ?? ''}
+      />
+      <CoachSessionHistoryDialog
+        coachId={selectedCoach?.id ?? null}
+        coachName={selectedCoach?.name ?? ''}
+        onClose={() => setSelectedCoach(null)}
       />
     </Stack>
   );

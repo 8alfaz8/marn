@@ -16,6 +16,7 @@ import TableRow from '@mui/material/TableRow';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import { recordCashEntry } from '@/lib/actions/cashLedger';
+import CoachSessionHistoryDialog from '@/components/shared/CoachSessionHistoryDialog';
 import { copy } from './copy';
 import type { CashLedger, CoachWorkload, SuperadminDashboard } from './types';
 // Generic, console-agnostic presentational primitives — reused rather than
@@ -37,6 +38,7 @@ export default function OverviewPanel({
   const [type, setType] = useState<'manual_in' | 'manual_out'>('manual_in');
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
+  const [selectedCoach, setSelectedCoach] = useState<{ id: string; name: string } | null>(null);
 
   const onRecord = (e: React.FormEvent) => {
     e.preventDefault();
@@ -126,7 +128,12 @@ export default function OverviewPanel({
               </TableHead>
               <TableBody>
                 {workload.map((coach) => (
-                  <TableRow key={coach.coachId} hover>
+                  <TableRow
+                    key={coach.coachId}
+                    hover
+                    onClick={() => setSelectedCoach({ id: coach.coachId, name: coach.name })}
+                    sx={{ cursor: 'pointer' }}
+                  >
                     <TableCell>{coach.name}</TableCell>
                     <TableCell align="right">{coach.shiftHoursNext7d}</TableCell>
                     <TableCell align="right">{coach.bookedHoursNext7d}</TableCell>
@@ -220,6 +227,11 @@ export default function OverviewPanel({
       </Grid>
 
       <Snackbar open={notice !== null} autoHideDuration={4000} onClose={() => setNotice(null)} message={notice ?? ''} />
+      <CoachSessionHistoryDialog
+        coachId={selectedCoach?.id ?? null}
+        coachName={selectedCoach?.name ?? ''}
+        onClose={() => setSelectedCoach(null)}
+      />
     </Stack>
   );
 }

@@ -26,11 +26,13 @@ import Slider from '@mui/material/Slider';
 import Drawer from '@mui/material/Drawer';
 import Alert from '@mui/material/Alert';
 import Fade from '@mui/material/Fade';
+import { alpha } from '@mui/material/styles';
 import CloseIcon from '@mui/icons-material/Close';
 import Chrome from './Chrome';
 import { Gonio } from './Viz';
 import { PremiumCard } from './premium';
 import { ConsoleSkeleton } from './skeletons';
+import { AmbientWash } from './MemberScreens';
 import { api, useSnapshot } from '@/lib/store';
 import { MUSCLES, MODALITIES, siteById, service, addon, colorOf, scopeSnapshotForCoach, todayIso } from '@/lib/reference';
 
@@ -221,11 +223,12 @@ export default function Coach({ coachId }: { coachId: string }) {
                             <Chip size="small" label={b.status} {...statusChip(b.status)} />
                           </TableCell>
                           <TableCell align="right">
+                            {/* Only the studio manager approves a request (blueprint §10.2,
+                                docs/adr/0008) — a coach sees it here for situational awareness
+                                only, never an action. docs/architecture/overview.md tracks this
+                                as a prototype-only deviation now closed. */}
                             {b.status === 'requested' ? (
-                              <Button size="small" variant="contained" onClick={(e) => {
-                                e.stopPropagation();
-                                act(api('POST', `/bookings/${b.id}/confirm`, { coachId }, 'COACH'), 'Confirmed — member notified');
-                              }}>Confirm</Button>
+                              <Typography variant="caption" color="text.secondary">Awaiting studio manager approval</Typography>
                             ) : b.status === 'confirmed' ? (
                               <Button size="small" variant="outlined" onClick={(e) => { e.stopPropagation(); setOpen(m.id); }}>
                                 Log session
@@ -414,16 +417,9 @@ export default function Coach({ coachId }: { coachId: string }) {
                     <Alert severity="warning" icon={false} sx={{ mt: 2 }}>{m.flags[0].text}</Alert>
                   )}
                 </Box>
-                <Stack direction="row" spacing={1} sx={{ flexShrink: 0 }}>
-                  <Button variant="contained" onClick={() => act(
-                    api('POST', `/bookings/${b.id}/confirm`, { coachId }, 'COACH'), 'Confirmed — member notified')}>
-                    Confirm
-                  </Button>
-                  <Button variant="outlined" onClick={() => act(
-                    api('POST', `/bookings/${b.id}/decline`, { reason: 'No coach available' }, 'COACH'), 'Declined — member notified')}>
-                    Decline
-                  </Button>
-                </Stack>
+                {/* Read-only for a coach — only the studio manager approves or
+                    declines a request (blueprint §10.2, docs/adr/0008). */}
+                <Chip label="Awaiting studio manager approval" size="small" sx={{ flexShrink: 0 }} />
               </Stack>
             </PremiumCard>
           );
@@ -662,26 +658,36 @@ export default function Coach({ coachId }: { coachId: string }) {
        a member/coach id to open the other consoles with. Everything the coach
        console itself renders comes from the scoped `snap`. */
     <Chrome current="coach" currentId={coachId} label={coachName} snap={rawSnap} refresh={refresh} msg={msg}>
-      <Container maxWidth="xl" sx={{ py: 3 }}>
-        <Tabs value={view} onChange={(_, v) => setView(v)} variant="scrollable" allowScrollButtonsMobile
-              sx={{ mb: 3, borderBottom: '1px solid', borderColor: 'divider' }}>
-          <Tab value="today" label="Today" />
-          <Tab value="members" label="Members" />
-          <Tab value="requests" label={
-            <Badge color="error" badgeContent={pending.length} sx={{ paddingInlineEnd: pending.length ? 2 : 0 }}>
-              Requests
-            </Badge>
-          } />
-        </Tabs>
-
-        <Fade in key={view} timeout={220}>
-          <Box>
-            {view === 'today' && renderToday()}
-            {view === 'members' && renderMembers()}
-            {view === 'requests' && renderRequests()}
+      <AmbientWash tab="coach">
+        <Container maxWidth="xl" sx={{ py: 3 }}>
+          <Box
+            sx={{
+              position: 'sticky', top: 'var(--marn-header-offset, 0px)', zIndex: (t) => t.zIndex.appBar,
+              bgcolor: (t) => alpha(t.palette.background.default, 0.86), backdropFilter: 'blur(12px)',
+              pb: 1, mb: 2,
+            }}
+          >
+            <Tabs value={view} onChange={(_, v) => setView(v)} variant="scrollable" allowScrollButtonsMobile
+                  sx={{ borderBottom: '1px solid', borderColor: 'divider' }}>
+              <Tab value="today" label="Today" />
+              <Tab value="members" label="Members" />
+              <Tab value="requests" label={
+                <Badge color="error" badgeContent={pending.length} sx={{ paddingInlineEnd: pending.length ? 2 : 0 }}>
+                  Requests
+                </Badge>
+              } />
+            </Tabs>
           </Box>
-        </Fade>
-      </Container>
+
+          <Fade in key={view} timeout={220}>
+            <Box>
+              {view === 'today' && renderToday()}
+              {view === 'members' && renderMembers()}
+              {view === 'requests' && renderRequests()}
+            </Box>
+          </Fade>
+        </Container>
+      </AmbientWash>
 
       {open && renderDrawer()}
     </Chrome>

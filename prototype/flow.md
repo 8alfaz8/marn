@@ -43,9 +43,13 @@ Same as the root file:
 
 Signup path branches at step 3: `Gate.tsx`'s `createMember()` calls `POST /members` with a chosen `siteId` (see the assessment/session flows below for the general `api()`/dispatcher pattern) before calling `openAs('member', ...)` at step 4.
 
-Sign-out / role switch / person switch: `components/Chrome.tsx` fetches its own `GET /api/directory` independently of the page's `snap` prop (a coach- or member-scoped snapshot doesn't carry every other studio's roster). `switchAccount()` calls `DELETE /api/session` then routes back to `/`. `switchRole()` (the Manager/Coach/Member/Admin `ToggleButtonGroup`) jumps to the first person of the target role at the current identity's own site (falling back to the pool's first entry, or straight to `admin` with no id lookup). The `TextField select` beside it — "the top-bar person switcher" — swaps to any person of the *current* role across *all three* sites (not site-restricted, unlike the role switch), using the same `openAs()`/`POST /api/session`/`router.push()` sequence as step 4/5 above.
+Sign-out / role switch / person switch: `components/Chrome.tsx` fetches its own `GET /api/directory` independently of the page's `snap` prop (a coach- or member-scoped snapshot doesn't carry every other studio's roster). `switchAccount()` calls `DELETE /api/session` then routes back to `/`. `switchRole()` (the Manager/Coach/Member/Admin `ToggleButtonGroup`) jumps to the first person of the target role at the current identity's own site (falling back to the pool's first entry, or straight to `admin` with no id lookup). The `TextField select` beside it — "the top-bar person switcher" — swaps to any person of the *current* role across *all three* sites (not site-restricted, unlike the role switch), using the same `openAs()`/`POST /api/session`/`router.push()` sequence as step 4/5 above. A site-filter `ToggleButtonGroup` (new, 2026-08-19, `docs/adr/0018` point 5/6) narrows that person pool before the select renders it — "your site" by default, "all," or any specific studio, purely a UX default since this tree has no real authorization to gate anyway.
 
-**Currently modifying:** n/a — settled as of 2026-08-18, see decisions.md
+`Chrome.tsx` is collapsible as of 2026-08-19 (product owner batch UI/UX review): defaults collapsed to a small floating `Fab` (role icon, top-inline-end), state in `localStorage` (`marn_chrome_collapsed`). While expanded, the rendered `AppBar`'s live height is measured via a `ResizeObserver` and exposed as the `--marn-header-offset` CSS var on the `<main>` wrapper, which `Manager.tsx`/`Coach.tsx`/`Admin.tsx` read to dock their own sticky tab-bar row directly under it (`position: sticky; top: var(--marn-header-offset, 0px)`) rather than under it colliding or a hardcoded guess.
+
+Same change also fixed a real browser-back bug: `openAs()`/`switchAccount()` set the identity cookie via a plain `fetch()`, not a Server Action, so Next's client-side back/forward cache (`invalidateBfCache()`, App Router internals) never learned the cookie had changed — pressing the browser's back button from e.g. `/member` could restore the pre-login snapshot of `/` instead of asking the server again, landing back on the persona picker even with a still-valid identity. Fixed by calling `router.refresh()` immediately after the cookie mutation in both `Chrome.tsx` and `Gate.tsx`'s `openAs()`, which invalidates that cache.
+
+**Currently modifying:** n/a — settled as of 2026-08-19, see decisions.md
 
 ---
 
@@ -139,17 +143,19 @@ The two stub adapters that a real device integration would use instead of step 3
 
 **Entry point:** Member "Book a session" flow (`components/Member.tsx`'s `renderBook()`) for the request; Coach "Today" or "Requests" tab for confirm/decline.
 
-**Path (member requests):**
-1. `components/Member.tsx` `renderBook()` (components/Member.tsx:680-797) — service/date/time/add-on picker; a `useEffect` (components/Member.tsx:203-207) fetches `GET /availability?date=...&serviceId=...` as the date/service selection changes →
-2. `app/api/[...path]/route.ts` `handle()`, branch `p === 'availability'` (app/api/[...path]/route.ts:142-146) → `slotsFor()` (app/api/[...path]/route.ts:90-101) — builds the day's slot grid and marks which are already booked →
-3. "Request session" button calls `components/Member.tsx` `book()` (components/Member.tsx:221-231) — `api('POST', '/bookings', {...draft}, 'MEMBER')` →
-4. `app/api/[...path]/route.ts` `handle()`, branch `p === 'bookings'` (app/api/[...path]/route.ts:237-249) — 404s if the member doesn't exist, **409s if `parqCleared` is false** (this is the server-side enforcement point for the PAR-Q gate on booking), re-checks the slot isn't already taken, inserts a `bookings` row with `status: 'requested'` →
+**Path (member requests, any studio — `docs/adr/0018`):**
+1. `components/Member.tsx` `renderBookPicker()` — a Studio `ToggleButtonGroup` (`SITES`, new) picked first, defaulting to the member's own site; service/date/time/add-on picker below it; a `useEffect` fetches `GET /availability?date=...&serviceId=...&siteId=...` as the studio/date/service selection changes →
+2. `app/api/[...path]/route.ts` `handle()`, branch `p === 'availability'` → `slotsFor(date, serviceId, siteId)` — `siteId` now scopes the busy-time grid to one studio (previously all three studios shared one grid, so a booking at Marina could block a slot at Business Bay — a real bug this change fixed as a side effect) →
+3. "Request session" button calls `components/Member.tsx` `book()` — `api('POST', '/bookings', {...draft, siteId}, 'MEMBER')` →
+4. `app/api/[...path]/route.ts` `handle()`, branch `p === 'bookings'` — 404s if the member doesn't exist, **409s if `parqCleared` is false** (this is the server-side enforcement point for the PAR-Q gate on booking), validates `body.siteId` against `SITES` (falling back to the member's own site if omitted), re-checks the slot isn't already taken *at that site*, inserts a `bookings` row with `status: 'requested'` and `siteId` (the chosen studio, not always the member's own) →
 5. Back in `Member.tsx` `book()` — toasts the returned message, switches back to the Today tab, refreshes the snapshot.
 
-**Path (coach confirms/declines):**
-1. `components/Coach.tsx` `renderToday()`'s Confirm button (components/Coach.tsx:219-222) or `renderRequests()`'s Confirm/Decline buttons (components/Coach.tsx:412-419) — call `api('POST', '/bookings/:id/confirm', {coachId}, 'COACH')` or `api('POST', '/bookings/:id/decline', {reason}, 'COACH')` →
-2. `app/api/[...path]/route.ts` `handle()`, branches `seg[2]==='confirm'` (app/api/[...path]/route.ts:251-254) / `seg[2]==='decline'` (app/api/[...path]/route.ts:255-258) — updates `bookings.status` to `'confirmed'`/`'cancelled'`, returns `{..., notified:['push','whatsapp']}` (simulated — no real notification is sent; see `prototype/decisions.md`'s note on the Notifications deviation) →
-3. `Coach.tsx` `act()` (components/Coach.tsx:119-122) — toasts and refreshes; the member sees the status change on their next poll (`components/Member.tsx`'s `renderToday()`/`renderBookingsList()` read `myBookings` off the same snapshot).
+**Path (studio manager confirms/declines — the sole approval path, `docs/adr/0008`):**
+1. `components/Manager.tsx`'s `ApproveAction` (Requests tab) — picks a coach, calls `api('POST', '/bookings/:id/confirm', {coachId}, 'MANAGER')` or `api('POST', '/bookings/:id/decline', {reason}, 'MANAGER')` →
+2. `app/api/[...path]/route.ts` `handle()`, branches `seg[2]==='confirm'` / `seg[2]==='decline'` — updates `bookings.status` to `'confirmed'`/`'cancelled'`, returns `{..., notified:['push','whatsapp']}` (simulated — no real notification is sent; see `prototype/decisions.md`'s note on the Notifications deviation) →
+3. `Manager.tsx` `act()` — toasts and refreshes; the member sees the status change on their next poll (`components/Member.tsx`'s `renderToday()`/`renderBookingsList()` read `myBookings` off the same snapshot).
+
+**Coach's own Today/Requests tabs are read-only as of 2026-08-19** (product owner batch review — see `prototype/decisions.md`): `components/Coach.tsx` renders an "Awaiting studio manager approval" chip in place of the Confirm/Decline buttons that used to call the same two endpoints above. The endpoints themselves are unchanged and still shared with the manager's path (docs/architecture/overview.md's existing note that "a manager and a coach approve through the identical write path" is now half-true — the write path is still shared, but only the manager's UI calls it; this is a UI-layer fix, not a server-side role check, consistent with `docs/adr/0002`'s "not a real security boundary" framing for this whole tree.
 
 Cancellation (member-initiated) follows the same shape: `Member.tsx`'s cancel buttons (components/Member.tsx:326, 666) call `api('DELETE', '/bookings/:id', ...)` → `app/api/[...path]/route.ts:259-262`, which sets `status: 'cancelled'`.
 

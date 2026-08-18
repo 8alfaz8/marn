@@ -173,9 +173,12 @@ async function membersList({ site, q: search, page, pageSize }: {
   return { members: out, total: count, page, pageSize };
 }
 
-async function slotsFor(dateStr: string, serviceId: string) {
+/* `siteId` scopes the busy-time grid to one studio (docs/adr/0018 point 2) —
+   without it every studio's bookings on the date blocked the same slot for
+   everyone, since the three studios run independent schedules. */
+async function slotsFor(dateStr: string, serviceId: string, siteId: string) {
   const sv = service(serviceId) ?? bad('Unknown service', 404);
-  const taken = await db.select().from(bookings).where(eq(bookings.date, dateStr));
+  const taken = await db.select().from(bookings).where(and(eq(bookings.date, dateStr), eq(bookings.siteId, siteId)));
   const busy = new Set(taken.filter((b) => b.status !== 'cancelled').map((b) => b.time));
   const step = sv.mins >= 60 ? 1 : 0.5;
   const out: { time: string; busy: boolean }[] = [];
@@ -241,7 +244,8 @@ async function handle(verb: string, seg: string[], q: URLSearchParams, body: any
   if (verb === 'GET' && p === 'availability') {
     const date = q.get('date') || todayIso();
     const serviceId = q.get('serviceId') || 'st30';
-    return { date, serviceId, slots: await slotsFor(date, serviceId) };
+    const siteId = q.get('siteId') || 's1';
+    return { date, serviceId, siteId, slots: await slotsFor(date, serviceId, siteId) };
   }
 
   /* Shift- and overlap-aware slots for one coach on one date — what the
@@ -382,12 +386,16 @@ async function handle(verb: string, seg: string[], q: URLSearchParams, body: any
     if (!m) bad('Member not found', 404);
     if (!m.parqCleared) bad('PAR-Q screening required before booking', 409);
     const sv = service(body.serviceId) ?? bad('Unknown service', 404);
-    const slots = await slotsFor(body.date, body.serviceId);
+    /* Members can book any studio (docs/adr/0018): siteId is member/client-
+       supplied and server-validated against the real site list, falling
+       back to the member's own site when omitted (e.g. older callers). */
+    const siteId = body.siteId ? (SITES.some((s) => s.id === body.siteId) ? body.siteId : bad('Unknown studio', 400)) : m.siteId;
+    const slots = await slotsFor(body.date, body.serviceId, siteId);
     if (slots.find((s) => s.time === body.time)?.busy) bad('Slot no longer available', 409);
     const addons: string[] = body.addons || [];
     const aed = sv.aed + addons.reduce((s, a) => s + addon(a).aed, 0);
     const id = uid('bk');
-    await db.insert(bookings).values({ id, memberId: m.id, coachId: null, siteId: m.siteId, serviceId: sv.id, date: body.date, time: body.time, status: 'requested', addons, aed } as any);
+    await db.insert(bookings).values({ id, memberId: m.id, coachId: null, siteId, serviceId: sv.id, date: body.date, time: body.time, status: 'requested', addons, aed } as any);
     return { booking: { id, status: 'requested', aed }, message: 'Request sent to the studio' };
   }
 

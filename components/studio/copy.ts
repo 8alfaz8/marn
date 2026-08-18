@@ -140,6 +140,7 @@ export const copy = {
   members: {
     heading: 'Members at this site',
     subtitle: 'Contact details for the front desk.',
+    siteFilter: 'Studio',
     empty: 'No members yet. Add the first one, then take their booking.',
     colName: 'Name',
     colPhone: 'Phone',

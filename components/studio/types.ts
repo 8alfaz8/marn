@@ -1,7 +1,7 @@
 import type { getManagerDashboard } from '@/lib/actions/dashboard';
 import type { getDaySchedule, getMemberBookingHistory } from '@/lib/actions/bookings';
 import type { getManagerMembers, getMemberContext } from '@/lib/actions/members';
-import type { getStaffRoster } from '@/lib/actions/staff';
+import type { getSites, getStaffRoster } from '@/lib/actions/staff';
 import type { getUpcomingShifts } from '@/lib/actions/shifts';
 
 /* Row shapes are derived from the read actions rather than restated, so a
@@ -13,6 +13,7 @@ export type Dashboard = Awaited<ReturnType<typeof getManagerDashboard>>;
 export type Booking = Dashboard['todaySchedule'][number];
 export type Member = Awaited<ReturnType<typeof getManagerMembers>>[number];
 export type StaffMember = Awaited<ReturnType<typeof getStaffRoster>>[number];
+export type Site = Awaited<ReturnType<typeof getSites>>[number];
 export type Shift = Awaited<ReturnType<typeof getUpcomingShifts>>[number];
 export type DaySchedule = Awaited<ReturnType<typeof getDaySchedule>>;
 export type MemberContext = Awaited<ReturnType<typeof getMemberContext>>;

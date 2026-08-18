@@ -26,6 +26,20 @@ const today = () => new Date().toISOString().slice(0, 10);
 
 const ACTIVE_BOOKING = ['requested', 'confirmed'] as const;
 
+/** A member-chosen `siteId` is a client-supplied input, never a fact
+ *  (CLAUDE.md Iron Rule) — validated against the real `sites` table before
+ *  it can drive an availability read or a booking write. `docs/adr/0018`
+ *  point 2: booking is fully decoupled from a member's home site, so this
+ *  replaces every place that used to trust `session.siteId` for a booking. */
+async function assertActiveSite(siteId: string) {
+  const [site] = await db
+    .select({ id: schema.sites.id })
+    .from(schema.sites)
+    .where(and(eq(schema.sites.id, siteId), eq(schema.sites.active, true)))
+    .limit(1);
+  if (!site) throw new Error('Unknown or inactive studio.');
+}
+
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /**
@@ -139,21 +153,30 @@ export async function getCoachDayAvailability(coachId: string, date: string, ser
   return computeCoachAvailability(coachId, date, serviceId, session.siteId, excludeBookingId);
 }
 
-/** Member-facing counterpart — always the member's own site, never a
- *  client-supplied one. */
-export async function getMemberAvailability(coachId: string, date: string, serviceId: string) {
-  const session = await requireMember();
-  return computeCoachAvailability(coachId, date, serviceId, session.siteId);
+/** Member-facing counterpart — `docs/adr/0018` point 2: a member can book
+ *  at any studio, so `siteId` is now a caller-supplied, server-validated
+ *  parameter rather than always `session.siteId`. */
+export async function getMemberAvailability(coachId: string, date: string, serviceId: string, siteId: string) {
+  await requireMember();
+  await assertActiveSite(siteId);
+  return computeCoachAvailability(coachId, date, serviceId, siteId);
 }
 
-/** Active coaches at the member's own site — id/name only, no contact or
- *  internal fields, for the self-booking coach picker. */
-export async function getActiveCoachesAtSite() {
-  const session = await requireMember();
+/** Active coaches at the chosen site — id/name only, no contact or
+ *  internal fields, for the self-booking coach picker. `siteId` is now
+ *  caller-supplied and validated, not always the member's own site
+ *  (`docs/adr/0018` point 2) — the coach list is site-dependent since a
+ *  coach only ever works one site. The site list itself for the studio
+ *  picker reuses `getActiveSites` from `lib/actions/memberAuth.ts` (the
+ *  same public site list `/join`'s registration picker already uses)
+ *  rather than a second copy here. */
+export async function getActiveCoachesAtSite(siteId: string) {
+  await requireMember();
+  await assertActiveSite(siteId);
   return db
     .select({ id: schema.staff.id, name: schema.staff.name })
     .from(schema.staff)
-    .where(and(eq(schema.staff.siteId, session.siteId), eq(schema.staff.role, 'coach'), eq(schema.staff.active, true)))
+    .where(and(eq(schema.staff.siteId, siteId), eq(schema.staff.role, 'coach'), eq(schema.staff.active, true)))
     .orderBy(schema.staff.name);
 }
 
@@ -211,24 +234,33 @@ export async function createBooking(input: {
  * `approveBooking` (below) is that not-yet-built sibling to
  * `declineBooking`, now built. `aed` is always derived from the price
  * list, never client-supplied — same rule as everywhere else money touches
- * a form in this codebase.
+ * a form in this codebase. `siteId` is caller-supplied and validated, not
+ * derived from `session.siteId` — `docs/adr/0018` point 2, a member can
+ * book at any studio, not just their registration site.
  */
-export async function createSelfBooking(input: { coachId: string; serviceId: string; date: string; time: string }) {
+export async function createSelfBooking(input: { siteId: string; coachId: string; serviceId: string; date: string; time: string }) {
   const session = await requireMember();
   if (!session.parqCleared) {
     throw new Error('You need a readiness screening with a coach before you can book — visit the studio to get started.');
   }
+  await assertActiveSite(input.siteId);
   const service = serviceById(input.serviceId);
   if (!service) throw new Error('Unknown service.');
 
   const id = `bkg_${randomUUID()}`;
   await db.transaction(async (tx) => {
-    await assertNoOverlap(tx, { ...input, memberId: session.memberId });
+    await assertNoOverlap(tx, {
+      coachId: input.coachId,
+      memberId: session.memberId,
+      date: input.date,
+      serviceId: input.serviceId,
+      time: input.time,
+    });
     await tx.insert(schema.bookings).values({
       id,
       memberId: session.memberId,
       coachId: input.coachId,
-      siteId: session.siteId,
+      siteId: input.siteId,
       serviceId: input.serviceId,
       date: input.date,
       time: input.time,
@@ -422,13 +454,18 @@ export async function reassignCoach(bookingId: string, coachId: string) {
 
 /** A member's booking/charge history — studio-manager-only, deliberately not
  *  part of `getMemberContext` (lib/actions/members.ts), which a coach also
- *  calls: coaches are excluded from payment data (docs/adr/0008). */
+ *  calls: coaches are excluded from payment data (docs/adr/0008). Not
+ *  site-filtered: `assertMemberInScope` already grants open-roster access
+ *  to this member regardless of site (`docs/adr/0018` point 3), and a
+ *  member can now book at any studio (point 2) — filtering this read to
+ *  `session.siteId` would silently hide bookings made elsewhere instead of
+ *  showing the member's real history. */
 export async function getMemberBookingHistory(memberId: string) {
   const session = await requireStudioManager();
   await assertMemberInScope(session, memberId);
   return db
     .select()
     .from(schema.bookings)
-    .where(and(eq(schema.bookings.memberId, memberId), eq(schema.bookings.siteId, session.siteId)))
+    .where(eq(schema.bookings.memberId, memberId))
     .orderBy(desc(schema.bookings.date), desc(schema.bookings.time));
 }

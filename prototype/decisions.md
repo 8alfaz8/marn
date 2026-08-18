@@ -23,6 +23,47 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-19 — Batch UI/UX review: collapsible chrome, cross-site booking, manager-only approval, progress redesign, and nine other fixes
+
+**Change:** thirteen product-owner UI/UX findings against the running prototype, all implemented in
+one pass: (1) `Chrome.tsx` collapses to a floating circle by default (`localStorage`-persisted), and
+Manager/Coach/Admin's tab bars became sticky under it via a `--marn-header-offset` CSS var; (2)
+members can book any of the three studios, not just their own (`docs/adr/0018`) — `Member.tsx` gained
+a studio picker, `POST /bookings`/`GET /availability` take a validated `siteId`, and `Chrome.tsx`'s
+person switcher gained a site filter; (3) `Coach.tsx`'s confirm/decline buttons became a read-only
+"Awaiting studio manager approval" state — `Manager.tsx`'s `ApproveAction` is now the only approval
+path, matching the blueprint (§10.2, `docs/adr/0008`) and the root product's already-correct
+behavior; (4) `Admin.tsx` roster rows open a coach-detail drawer (profile + session history); (5)
+`theme.marn.ambientWash` gained manager/coach/admin/body/home entries so every surface gets the
+gradient wash, not just Member's three original tabs; (6) `Member.tsx`'s bottom nav grew to five tabs
+(added Body map, Home), the Today-screen quick-link duplicates removed; (7) `ProgressScreen` charts
+Mobility/Recovery trend history (new `TrendCard` + MUI `SparkLineChart`), not just a flat "NOW"
+number, and its x-axis labels fixed (day+month, capped tick count — weekly data used to repeat the
+same month label); (8) `SessionsListScreen` now shows upcoming bookings, then a Book button, then
+past sessions, in that order; (9) the "this week" dot-tile replaced with a `Gonio`-based weekly-goal
+ring; (10) the selected-service description text in the booking picker now uses an alpha-blended
+`primary.contrastText` when selected instead of a hardcoded `text.secondary` that was low-contrast on
+the brass selected background; (11) `MuiToggleButtonGroup`'s pill-radius theme override — correct for
+a single row, but clipping/overlapping wrapped rows into one mismatched oval — got an explicit
+`radius.lg` override at every multi-row call site (Date/Time pickers, site filters); (12) a real
+`router.refresh()` bug fix so the browser's back button no longer restores a stale pre-login
+snapshot of `/` (Next's client bfcache never learned the identity cookie had changed, since it's set
+via `fetch()` not a Server Action); (13) a `MoveThumbnail` placeholder (gradient tile + play icon, no
+external image fetch) added to each home-programme move.
+
+**Why:** direct product-owner review of running screenshots, each item traced to a concrete bug or
+gap in the code (see `prototype/flow.md`'s updated "Booking: request → confirm / decline" and
+"Category/person picker" entries for the two items with real call-chain changes) rather than taken on
+faith from the screenshot alone.
+
+**Trade-off accepted:** items 2 and 3's root cause (any-studio booking, manager-only approval) are
+scoped identically at the real product root (`docs/adr/0018`, `lib/authz.ts`) — this prototype-side
+fix is UI/API-shape parity, not a second independent design; the prototype has no real authorization
+to enforce approval server-side anyway (`docs/adr/0002`), so item 3's fix is deliberately UI-only, not
+a role check that would be security theater here.
+
+---
+
 ## 2026-08-19 — Role-prefixed demo names for managers and coaches
 
 **Change:** `db/seed.ts`'s naming — previously every seeded person (manager, coach, member) shared

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -10,9 +10,10 @@ import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import { SERVICES, serviceById } from '@/lib/reference';
 import { createSelfBooking, getActiveCoachesAtSite, getMemberAvailability } from '@/lib/actions/bookings';
+import { getActiveSites } from '@/lib/actions/memberAuth';
 import TimeSlotPicker from '@/components/shared/TimeSlotPicker';
 import { copy } from './copy';
-import type { ActiveCoach } from './types';
+import type { ActiveCoach, ActiveSite } from './types';
 
 /* Module-scope per CLAUDE.md's known trap — survives MemberConsole's tab
    switches and any background refresh with the half-filled form intact. */
@@ -25,6 +26,8 @@ export default function BookingForm({
   referredToDoctor: boolean;
   onBooked: () => void;
 }) {
+  const [sites, setSites] = useState<ActiveSite[] | null>(null);
+  const [siteId, setSiteId] = useState('');
   const [coaches, setCoaches] = useState<ActiveCoach[] | null>(null);
   const [serviceId, setServiceId] = useState('');
   const [coachId, setCoachId] = useState('');
@@ -35,8 +38,25 @@ export default function BookingForm({
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    if (parqCleared) getActiveCoachesAtSite().then(setCoaches);
+    if (parqCleared) getActiveSites().then(setSites);
   }, [parqCleared]);
+
+  useEffect(() => {
+    if (!siteId) {
+      setCoaches(null);
+      return;
+    }
+    getActiveCoachesAtSite(siteId).then(setCoaches);
+  }, [siteId]);
+
+  // docs/adr/0018 point 2 — availability is per chosen studio; bound here so
+  // TimeSlotPicker's `fetchSlots` prop keeps its existing (coachId, date,
+  // serviceId, excludeBookingId?) shape. Recreated only when siteId changes,
+  // not on every render, so it doesn't retrigger the picker's effect.
+  const fetchSlots = useCallback(
+    (coachId: string, date: string, serviceId: string) => getMemberAvailability(coachId, date, serviceId, siteId),
+    [siteId],
+  );
 
   if (!parqCleared) {
     return (
@@ -59,7 +79,7 @@ export default function BookingForm({
     setSaved(false);
     setStatus('saving');
     try {
-      await createSelfBooking({ coachId, serviceId, date, time });
+      await createSelfBooking({ siteId, coachId, serviceId, date, time });
       setTime('');
       setSaved(true);
       onBooked();
@@ -75,6 +95,24 @@ export default function BookingForm({
       <Typography variant="h6">{copy.booking.heading}</Typography>
       {error && <Alert severity="error">{error}</Alert>}
       {saved && <Alert severity="success">{copy.booking.requested}</Alert>}
+
+      <TextField
+        select
+        label={copy.booking.studio}
+        value={siteId}
+        onChange={(e) => {
+          setSiteId(e.target.value);
+          setCoachId('');
+          setTime('');
+        }}
+        disabled={!sites || sites.length === 0}
+      >
+        {(sites ?? []).map((s) => (
+          <MenuItem key={s.id} value={s.id}>
+            {s.name}
+          </MenuItem>
+        ))}
+      </TextField>
 
       <TextField
         select
@@ -105,7 +143,7 @@ export default function BookingForm({
           setCoachId(e.target.value);
           setTime('');
         }}
-        disabled={!coaches || coaches.length === 0}
+        disabled={!siteId || !coaches || coaches.length === 0}
       >
         {(coaches ?? []).map((c) => (
           <MenuItem key={c.id} value={c.id}>
@@ -135,7 +173,7 @@ export default function BookingForm({
           date={date}
           value={time}
           onChange={setTime}
-          fetchSlots={getMemberAvailability}
+          fetchSlots={fetchSlots}
           pickCoachFirstLabel={copy.booking.pickCoachFirst}
           loadingLabel={copy.booking.loadingSlots}
           noSlotsLabel={copy.booking.noSlots}

@@ -1,5 +1,5 @@
 import { cookies, headers } from 'next/headers';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { auth } from './auth';
 import { db, schema } from '@/db';
 
@@ -155,66 +155,28 @@ export async function requireStudioManagerOrSuperadmin(): Promise<
 
 /**
  * Every per-member read or write goes through this, not just the roster
- * listing — otherwise a coach who already knows another coach's member id
- * could read past it (docs/adr/0008: a coach only ever sees members with a
- * booking or session tied to them, at their own site). Studio managers are
- * scoped to their site only, no per-coach narrowing. A superadmin is not
- * site-scoped at all (docs/adr/0011) — full cross-site access, the same
- * unrestricted read a studio manager has at their own site, just not
- * site-locked.
+ * listing. **Open roster (`docs/adr/0018`, point 3, 2026-08-19):** any
+ * active coach or studio manager, at any site, can open any member's
+ * record — a member can now book at any studio, so the coach/session-tie
+ * and site-gating this function used to enforce (docs/adr/0008) would
+ * block the exact cross-site access the product now wants. Superadmin
+ * access was already unrestricted (`docs/adr/0011`) and is unchanged.
  *
- * A not-yet-screened member is also in scope for *any* coach at the site,
- * not just an assigned one — readiness screening is "completed with a
- * coach at first visit" (blueprint §4.1.10), and a first-timer has no
- * booking/session by definition. Without this, no coach could ever reach a
- * new member to screen them, and `createBooking`'s readiness gate means
- * they could also never get a booking — a dead end discovered via
- * browser-driven verification (`docs/decisions.md`, 2026-08-11). An
- * unscreened member has no session/measurement/flag history yet to protect
- * from a coach who isn't "theirs," so this narrowly reopens exactly the gap
- * that's blocking, nothing more.
+ * This function used to additionally narrow a *coach's* access to members
+ * with a booking/session tie at their own site, or a not-yet-screened
+ * member at the site, or the member they most recently PAR-Q screened —
+ * two real onboarding deadlocks (a coach couldn't reach a first-time
+ * member to screen them; a coach lost their own member mid-panel the
+ * instant a screening cleared them) were found and fixed there via
+ * browser-driven verification, `docs/decisions.md` 2026-08-11 and
+ * 2026-08-12. ADR 0018 removes the narrowing itself, not just those two
+ * fixes — read the ADR before reintroducing any per-coach scoping here.
  *
- * **The coach who just cleared a member keeps access through the rest of
- * that first visit**, even though clearing flips `parqCleared` to `true`
- * and no booking/session exists yet — otherwise a coach loses their own
- * member mid-panel the instant they finish the screening, before they can
- * record a measurement, prescribe a programme, or log the session that
- * first visit is actually for. A second bug found via browser-driven
- * verification (`docs/decisions.md`, 2026-08-12), same root cause as the
- * first: "cleared" and "has an ordinary booking/session tie yet" are not
- * the same moment. Scoped to whoever performed the *most recent*
- * screening — once someone else's booking/session naturally takes over,
- * this stops mattering.
+ * The contract that survives: member exists → return it; member doesn't
+ * exist → `ForbiddenError`.
  */
 export async function assertMemberInScope(session: StaffSession, memberId: string) {
   const [member] = await db.select().from(schema.members).where(eq(schema.members.id, memberId)).limit(1);
   if (!member) throw new ForbiddenError('Member not found');
-  if (session.role === 'superadmin') return member;
-  if (member.siteId !== session.siteId) throw new ForbiddenError('Member not at your site');
-  if (session.role === 'studio_manager') return member;
-  if (!member.parqCleared) return member;
-
-  const [booking] = await db
-    .select({ id: schema.bookings.id })
-    .from(schema.bookings)
-    .where(and(eq(schema.bookings.memberId, memberId), eq(schema.bookings.coachId, session.staffId)))
-    .limit(1);
-  if (booking) return member;
-
-  const [sessionRow] = await db
-    .select({ id: schema.sessions.id })
-    .from(schema.sessions)
-    .where(and(eq(schema.sessions.memberId, memberId), eq(schema.sessions.coachId, session.staffId)))
-    .limit(1);
-  if (sessionRow) return member;
-
-  const [latestScreening] = await db
-    .select({ staffId: schema.parqScreenings.staffId })
-    .from(schema.parqScreenings)
-    .where(eq(schema.parqScreenings.memberId, memberId))
-    .orderBy(desc(schema.parqScreenings.createdAt))
-    .limit(1);
-  if (latestScreening?.staffId === session.staffId) return member;
-
-  throw new ForbiddenError('Member not assigned to you');
+  return member;
 }

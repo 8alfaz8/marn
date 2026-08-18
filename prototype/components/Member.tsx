@@ -29,6 +29,9 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import EventAvailableOutlinedIcon from '@mui/icons-material/EventAvailableOutlined';
 import ShowChartOutlinedIcon from '@mui/icons-material/ShowChartOutlined';
 import TodayOutlinedIcon from '@mui/icons-material/TodayOutlined';
+import AccessibilityNewOutlinedIcon from '@mui/icons-material/AccessibilityNewOutlined';
+import SelfImprovementOutlinedIcon from '@mui/icons-material/SelfImprovementOutlined';
+import PlayCircleOutlineOutlinedIcon from '@mui/icons-material/PlayCircleOutlineOutlined';
 import Fade from '@mui/material/Fade';
 import Chrome from './Chrome';
 import ParqForm from './ParqForm';
@@ -42,7 +45,7 @@ import {
 } from './MemberScreens';
 import { api, useSnapshot } from '@/lib/store';
 import {
-  MUSCLES, SERVICES, ADDONS, siteById,
+  MUSCLES, SERVICES, ADDONS, SITES, siteById,
   muscle, service, addon, colorOf, iso, addDays, todayIso,
 } from '@/lib/reference';
 
@@ -52,14 +55,12 @@ import {
    Self-contained: it owns the snapshot poll, its own toast, and the Chrome
    wrapper. app/member/page.tsx only hands it the id off the session cookie.
 
-   Bottom nav is the brand handoff's three tabs — Today, Progress, Sessions
-   (`components/MemberScreens.tsx` implements those five brand screens).
-   Two existing, blueprint-protected features the 5-screen handoff doesn't
-   cover — the whole-body map and the home programme — aren't a tab anymore;
-   they're reachable as full-screen views from Today's quick links, tracked
-   here as plain booleans (`bodyOpen`/`homeOpen`) rather than dropped. Booking
-   is the same: a full-screen view opened from Today's "Book" button, not a
-   tab. See prototype/decisions.md for the reasoning.
+   Bottom nav is the brand handoff's three tabs — Today, Progress, Sessions —
+   plus Body map and Home programme as two more tabs alongside them
+   (`components/MemberScreens.tsx` implements the five brand screens; body
+   map/home programme render via this file's own `renderBody`/`renderHome`).
+   Booking is a full-screen view opened from Today's "Book" button or the
+   Sessions tab, not a tab of its own. See prototype/decisions.md.
 
    STRUCTURE RULE (CLAUDE.md "Known trap"): nothing that renders is defined
    inside this component's body. The tab/overlay views below are plain
@@ -70,13 +71,15 @@ import {
    identity) since they're substantial enough to want their own file.
 --------------------------------------------------------------------------- */
 
-type MemberTab = 'today' | 'progress' | 'sessions';
+type MemberTab = 'today' | 'progress' | 'sessions' | 'body' | 'home';
 type SessionsView = { view: 'list' } | { view: 'detail' | 'mobility' | 'report'; sessionId: string };
 
 const TABS: { key: MemberTab; label: string; icon: React.ReactNode }[] = [
   { key: 'today', label: 'Today', icon: <TodayOutlinedIcon /> },
   { key: 'progress', label: 'Progress', icon: <ShowChartOutlinedIcon /> },
   { key: 'sessions', label: 'Sessions', icon: <EventAvailableOutlinedIcon /> },
+  { key: 'body', label: 'Body map', icon: <AccessibilityNewOutlinedIcon /> },
+  { key: 'home', label: 'Home', icon: <SelfImprovementOutlinedIcon /> },
 ];
 
 const EMPTY_SNAP = {
@@ -113,6 +116,32 @@ function PageTitle({ eyebrow, title, onBack }: { eyebrow: string; title: string;
   );
 }
 
+/** Placeholder for future in-house move video — a gradient tile with a play
+ * glyph and the move's position number as a watermark, not a stock photo
+ * (licensing risk, and it would clash with the brand system). Swap for a
+ * real thumbnail once the video library exists. */
+function MoveThumbnail({ n }: { n: number }) {
+  return (
+    <Box
+      sx={{
+        width: 56, height: 56, flexShrink: 0, borderRadius: (t) => `${t.marn.radius.sm}px`,
+        backgroundImage: (t) => t.marn.ambientWash.home,
+        backgroundColor: 'background.raised',
+        border: '1px solid', borderColor: 'divider',
+        display: 'grid', placeItems: 'center', position: 'relative', overflow: 'hidden',
+      }}
+    >
+      <Typography
+        aria-hidden variant="overline"
+        sx={{ position: 'absolute', insetInlineEnd: 4, insetBlockEnd: 2, fontSize: '1.1rem', color: 'text.disabled', opacity: 0.5 }}
+      >
+        {n}
+      </Typography>
+      <PlayCircleOutlineOutlinedIcon sx={{ color: 'primary.main', fontSize: 26 }} />
+    </Box>
+  );
+}
+
 function EmptyPanel({ children }: { children: React.ReactNode }) {
   return (
     <Paper variant="outlined" sx={{ p: 3 }}>
@@ -132,11 +161,9 @@ export default function Member({ memberId }: { memberId: string }) {
   const [tab, setTab] = useState<MemberTab>('today');
   const [sessionsView, setSessionsView] = useState<SessionsView>({ view: 'list' });
   const [sel, setSel] = useState('hamstrings');
-  const [draft, setDraft] = useState<{ svc: string; date: string; slot: string | null; addons: string[] }>(
-    { svc: 'st30', date: todayIso(), slot: null, addons: [] });
+  const [draft, setDraft] = useState<{ svc: string; siteId: string; date: string; slot: string | null; addons: string[] }>(
+    { svc: 'st30', siteId: '', date: todayIso(), slot: null, addons: [] });
   const [slots, setSlots] = useState<any[]>([]);
-  const [bodyOpen, setBodyOpen] = useState(false);
-  const [homeOpen, setHomeOpen] = useState(false);
   const [bookOpen, setBookOpen] = useState(false);
   const [bookPicker, setBookPicker] = useState(false);
   const [parqOpen, setParqOpen] = useState(false);
@@ -155,12 +182,15 @@ export default function Member({ memberId }: { memberId: string }) {
   const myBookings = s.bookings.filter((b: any) => b.memberId === memberId && !['cancelled', 'completed'].includes(b.status));
   const coachName = (id: string | null) => s.coaches.find((c: any) => c.id === id)?.name || 'Coach to be assigned';
   const siteName = siteById(me?.siteId)?.name || 'Studio';
+  // Members can book any studio (docs/adr/0018) — the booking draft defaults
+  // to home site until the member picks another one in renderBookPicker.
+  const bookSiteId = draft.siteId || me?.siteId || SITES[0].id;
 
   useEffect(() => {
     if (!bookPicker) return;
-    api('GET', `/availability?date=${draft.date}&serviceId=${draft.svc}`, undefined, 'MEMBER')
+    api('GET', `/availability?date=${draft.date}&serviceId=${draft.svc}&siteId=${bookSiteId}`, undefined, 'MEMBER')
       .then((r) => setSlots(r.slots)).catch(() => setSlots([]));
-  }, [bookPicker, draft.date, draft.svc]);
+  }, [bookPicker, draft.date, draft.svc, bookSiteId]);
 
   /* ---------- actions ---------- */
 
@@ -172,7 +202,7 @@ export default function Member({ memberId }: { memberId: string }) {
   const book = async () => {
     try {
       const r = await api('POST', '/bookings',
-        { memberId, serviceId: draft.svc, date: draft.date, time: draft.slot, addons: draft.addons }, 'MEMBER');
+        { memberId, serviceId: draft.svc, siteId: bookSiteId, date: draft.date, time: draft.slot, addons: draft.addons }, 'MEMBER');
       toast(r.message);
       setDraft({ ...draft, slot: null });
       setBookPicker(false);
@@ -190,7 +220,7 @@ export default function Member({ memberId }: { memberId: string }) {
 
   const openTab = (t: MemberTab) => {
     setTab(t);
-    setBodyOpen(false); setHomeOpen(false); setBookOpen(false); setBookPicker(false);
+    setBookOpen(false); setBookPicker(false);
     setSessionsView({ view: 'list' });
   };
 
@@ -219,7 +249,7 @@ export default function Member({ memberId }: { memberId: string }) {
     if (!meas.length) {
       return (
         <Stack spacing={2}>
-          <PageTitle eyebrow="Range of motion" title="Body map" onBack={() => setBodyOpen(false)} />
+          <PageTitle eyebrow="Range of motion" title="Body map" onBack={() => openTab('today')} />
           <EmptyPanel>
             Nothing measured yet. Your coach captures ten joint angles at your first session and this map fills in.
           </EmptyPanel>
@@ -237,7 +267,7 @@ export default function Member({ memberId }: { memberId: string }) {
         <PageTitle
           eyebrow={`Assessment · ${assessment?.capturedAt} · ${assessment?.source === 'bodymap' ? 'BodyMap device' : 'coach entry'}`}
           title="Range of motion"
-          onBack={() => setBodyOpen(false)}
+          onBack={() => openTab('today')}
         />
 
         <Paper variant="outlined" sx={{ p: 2.5, borderRadius: (t) => `${t.marn.radius.lg}px` }}>
@@ -325,7 +355,7 @@ export default function Member({ memberId }: { memberId: string }) {
 
   const renderHome = () => (
     <Stack spacing={2}>
-      <PageTitle eyebrow="Prescribed by your coach" title="Home programme" onBack={() => setHomeOpen(false)} />
+      <PageTitle eyebrow="Prescribed by your coach" title="Home programme" onBack={() => openTab('today')} />
       {programs.length ? programs.map((p: any) => {
         const doneToday = p.completions.includes(todayIso());
         return (
@@ -343,10 +373,8 @@ export default function Member({ memberId }: { memberId: string }) {
 
             <Stack sx={{ mt: 1.5 }}>
               {p.moves.map((mv: any, i: number) => (
-                <Box key={i} sx={{ display: 'flex', gap: 2, py: 1, borderBlockStart: i ? '1px solid' : 'none', borderColor: 'divider' }}>
-                  <Typography variant="overline" sx={{ color: 'text.secondary' }}>
-                    {String(i + 1).padStart(2, '0')}
-                  </Typography>
+                <Box key={i} sx={{ display: 'flex', gap: 2, py: 1, alignItems: 'center', borderBlockStart: i ? '1px solid' : 'none', borderColor: 'divider' }}>
+                  <MoveThumbnail n={i + 1} />
                   <Box>
                     <Typography variant="subtitle2">{mv.n}</Typography>
                     <Typography variant="body2" sx={{ color: 'text.secondary' }}>{mv.d}</Typography>
@@ -417,32 +445,53 @@ export default function Member({ memberId }: { memberId: string }) {
 
     return (
       <Stack spacing={2}>
-        <PageTitle eyebrow={siteName} title="Book a session" onBack={() => setBookPicker(false)} />
+        <PageTitle eyebrow={siteById(bookSiteId)?.name ?? siteName} title="Book a session" onBack={() => setBookPicker(false)} />
 
         {parqCallout()}
 
         <Paper variant="outlined" sx={{ p: 2.5 }}>
-          <Eyebrow>Service</Eyebrow>
+          <Eyebrow>Studio</Eyebrow>
           <ToggleButtonGroup
-            orientation="vertical"
+            size="small"
             exclusive
-            fullWidth
-            value={draft.svc}
-            onChange={(_, v) => v && setDraft({ ...draft, svc: v, slot: null })}
-            sx={{ mt: 1 }}
+            value={bookSiteId}
+            onChange={(_, v) => v && setDraft({ ...draft, siteId: v, slot: null })}
+            sx={{ mt: 1, flexWrap: 'wrap', borderRadius: (t) => `${t.marn.radius.lg}px` }}
           >
-            {SERVICES.map((x) => (
-              <ToggleButton key={x.id} value={x.id} sx={{ textAlign: 'start', display: 'block', px: 2, py: 1.5 }}>
-                <Stack direction="row" spacing={2} sx={{ alignItems: 'baseline', justifyContent: 'space-between' }}>
-                  <Typography variant="subtitle2">{x.name}</Typography>
-                  <Typography variant="overline">AED {x.aed}</Typography>
-                </Stack>
-                <Typography variant="body2" sx={{ color: 'text.secondary', textTransform: 'none' }}>
-                  {x.mins} min · {x.desc}
-                </Typography>
-              </ToggleButton>
+            {SITES.map((x) => (
+              <ToggleButton key={x.id} value={x.id}>{x.name.replace('Marn — ', '')}</ToggleButton>
             ))}
           </ToggleButtonGroup>
+
+          <Box sx={{ mt: 3 }}>
+            <Eyebrow>Service</Eyebrow>
+            <ToggleButtonGroup
+              orientation="vertical"
+              exclusive
+              fullWidth
+              value={draft.svc}
+              onChange={(_, v) => v && setDraft({ ...draft, svc: v, slot: null })}
+              sx={{ mt: 1 }}
+            >
+              {SERVICES.map((x) => (
+                <ToggleButton key={x.id} value={x.id} sx={{ textAlign: 'start', display: 'block', px: 2, py: 1.5 }}>
+                  <Stack direction="row" spacing={2} sx={{ alignItems: 'baseline', justifyContent: 'space-between' }}>
+                    <Typography variant="subtitle2">{x.name}</Typography>
+                    <Typography variant="overline">AED {x.aed}</Typography>
+                  </Stack>
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      textTransform: 'none',
+                      color: x.id === draft.svc ? (t) => alpha(t.palette.primary.contrastText, 0.8) : 'text.secondary',
+                    }}
+                  >
+                    {x.mins} min · {x.desc}
+                  </Typography>
+                </ToggleButton>
+              ))}
+            </ToggleButtonGroup>
+          </Box>
 
           <Box sx={{ mt: 3 }}>
             <Eyebrow>Date</Eyebrow>
@@ -451,7 +500,7 @@ export default function Member({ memberId }: { memberId: string }) {
               exclusive
               value={draft.date}
               onChange={(_, v) => v && setDraft({ ...draft, date: v, slot: null })}
-              sx={{ mt: 1, flexWrap: 'wrap' }}
+              sx={{ mt: 1, flexWrap: 'wrap', borderRadius: (t) => `${t.marn.radius.lg}px` }}
             >
               {dates.map((d) => (
                 <ToggleButton key={iso(d)} value={iso(d)}>
@@ -469,7 +518,7 @@ export default function Member({ memberId }: { memberId: string }) {
                 exclusive
                 value={draft.slot}
                 onChange={(_, v) => v && setDraft({ ...draft, slot: v })}
-                sx={{ mt: 1, flexWrap: 'wrap' }}
+                sx={{ mt: 1, flexWrap: 'wrap', borderRadius: (t) => `${t.marn.radius.lg}px` }}
               >
                 {slots.map((x) => (
                   <ToggleButton key={x.time} value={x.time} disabled={x.busy}>{x.time}</ToggleButton>
@@ -530,12 +579,22 @@ export default function Member({ memberId }: { memberId: string }) {
         <SessionsListScreen
           snap={s}
           memberId={memberId}
+          myBookings={myBookings}
           onOpenSession={(id) => setSessionsView({ view: 'detail', sessionId: id })}
+          onOpenBooking={() => setBookOpen(true)}
         />
       );
     }
     const session = sessions.find((x: any) => x.id === sessionsView.sessionId);
-    if (!session) return <SessionsListScreen snap={s} memberId={memberId} onOpenSession={(id) => setSessionsView({ view: 'detail', sessionId: id })} />;
+    if (!session) {
+      return (
+        <SessionsListScreen
+          snap={s} memberId={memberId} myBookings={myBookings}
+          onOpenSession={(id) => setSessionsView({ view: 'detail', sessionId: id })}
+          onOpenBooking={() => setBookOpen(true)}
+        />
+      );
+    }
 
     if (sessionsView.view === 'detail') {
       return (
@@ -558,8 +617,6 @@ export default function Member({ memberId }: { memberId: string }) {
     if (!snap) return <MemberBodySkeleton />;
     if (!me) return <Alert severity="error">We could not find that member account.</Alert>;
 
-    if (bodyOpen) return renderBody();
-    if (homeOpen) return renderHome();
     if (bookOpen) return bookPicker ? renderBookPicker() : renderBookingsList();
 
     switch (tab) {
@@ -569,8 +626,7 @@ export default function Member({ memberId }: { memberId: string }) {
             {parqCallout()}
             <TodayScreen
               snap={s} memberId={memberId}
-              onOpenBody={() => setBodyOpen(true)}
-              onOpenHome={() => setHomeOpen(true)}
+              onOpenBody={() => openTab('body')}
               onOpenBooking={() => setBookOpen(true)}
               onOpenCheckin={() => setCheckinOpen(true)}
             />
@@ -580,6 +636,10 @@ export default function Member({ memberId }: { memberId: string }) {
         return <ProgressScreen snap={s} memberId={memberId} />;
       case 'sessions':
         return renderSessions();
+      case 'body':
+        return renderBody();
+      case 'home':
+        return renderHome();
     }
   };
 
@@ -590,7 +650,7 @@ export default function Member({ memberId }: { memberId: string }) {
           maxWidth="sm"
           sx={{ py: 3, paddingBlockEnd: (t) => `calc(${t.spacing(12)} + env(safe-area-inset-bottom))` }}
         >
-          <Fade in key={`${tab}-${bodyOpen}-${homeOpen}-${bookOpen}-${bookPicker}-${sessionsView.view}`} timeout={220}>
+          <Fade in key={`${tab}-${bookOpen}-${bookPicker}-${sessionsView.view}`} timeout={220}>
             <Box>{body()}</Box>
           </Fade>
         </Container>

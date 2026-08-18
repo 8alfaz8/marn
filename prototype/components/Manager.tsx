@@ -23,12 +23,14 @@ import FormControlLabel from '@mui/material/FormControlLabel';
 import Popover from '@mui/material/Popover';
 import Alert from '@mui/material/Alert';
 import Fade from '@mui/material/Fade';
+import { alpha } from '@mui/material/styles';
 import Chrome from './Chrome';
 import DayTimeline from './DayTimeline';
 import TimeSlotPicker from './TimeSlotPicker';
 import { PremiumCard } from './premium';
 import { ConsoleSkeleton } from './skeletons';
 import MembersList from './MembersList';
+import { AmbientWash } from './MemberScreens';
 import { api, useSnapshot } from '@/lib/store';
 import { SERVICES, service, siteById, todayIso } from '@/lib/reference';
 
@@ -453,26 +455,36 @@ export default function Manager({ managerId }: { managerId: string }) {
 
   return (
     <Chrome current="manager" currentId={managerId} label={mgrName} snap={snap} refresh={refresh} msg={msg}>
-      <Container maxWidth="xl" sx={{ py: 3 }}>
-        <Tabs value={view} onChange={(_, v) => setView(v)} variant="scrollable" allowScrollButtonsMobile
-              sx={{ mb: 3, borderBottom: '1px solid', borderColor: 'divider' }}>
-          <Tab value="floor" label="Floor" />
-          <Tab value="requests" label={
-            <Badge color="error" badgeContent={pending.length} sx={{ paddingInlineEnd: pending.length ? 2 : 0 }}>Requests</Badge>
-          } />
-          <Tab value="staff" label="Staff" />
-          <Tab value="members" label="Members" />
-        </Tabs>
-
-        <Fade in key={view} timeout={220}>
-          <Box>
-            {view === 'floor' && renderFloor()}
-            {view === 'requests' && renderRequests()}
-            {view === 'staff' && renderStaff()}
-            {view === 'members' && renderMembers()}
+      <AmbientWash tab="manager">
+        <Container maxWidth="xl" sx={{ py: 3 }}>
+          <Box
+            sx={{
+              position: 'sticky', top: 'var(--marn-header-offset, 0px)', zIndex: (t) => t.zIndex.appBar,
+              bgcolor: (t) => alpha(t.palette.background.default, 0.86), backdropFilter: 'blur(12px)',
+              pt: 0, pb: 1, mb: 2,
+            }}
+          >
+            <Tabs value={view} onChange={(_, v) => setView(v)} variant="scrollable" allowScrollButtonsMobile
+                  sx={{ borderBottom: '1px solid', borderColor: 'divider' }}>
+              <Tab value="floor" label="Floor" />
+              <Tab value="requests" label={
+                <Badge color="error" badgeContent={pending.length} sx={{ paddingInlineEnd: pending.length ? 2 : 0 }}>Requests</Badge>
+              } />
+              <Tab value="staff" label="Staff" />
+              <Tab value="members" label="Members" />
+            </Tabs>
           </Box>
-        </Fade>
-      </Container>
+
+          <Fade in key={view} timeout={220}>
+            <Box>
+              {view === 'floor' && renderFloor()}
+              {view === 'requests' && renderRequests()}
+              {view === 'staff' && renderStaff()}
+              {view === 'members' && renderMembers()}
+            </Box>
+          </Fade>
+        </Container>
+      </AmbientWash>
     </Chrome>
   );
 }

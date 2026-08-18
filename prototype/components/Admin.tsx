@@ -28,14 +28,15 @@ import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import ToggleButton from '@mui/material/ToggleButton';
 import Fade from '@mui/material/Fade';
 import { BarChart } from '@mui/x-charts/BarChart';
-import { useTheme } from '@mui/material/styles';
+import { useTheme, alpha } from '@mui/material/styles';
 import Chrome from './Chrome';
 import { Gonio } from './Viz';
 import { PremiumCard } from './premium';
 import { ConsoleSkeleton } from './skeletons';
 import MembersList from './MembersList';
+import { AmbientWash } from './MemberScreens';
 import { api, useSnapshot } from '@/lib/store';
-import { MUSCLES, MODALITIES, SITES, SERVICES, service, addon, iso, addDays, todayIso, scopeSnapshotForManager } from '@/lib/reference';
+import { MUSCLES, MODALITIES, SITES, SERVICES, service, addon, siteById, iso, addDays, todayIso, scopeSnapshotForManager } from '@/lib/reference';
 
 const fmtDate = (d: string) => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 const blankSession = (mins = 30) => ({
@@ -78,6 +79,7 @@ export default function Admin() {
   const [earningsRange, setEarningsRange] = useState<RangeKey>('1m');
   const [siteFilter, setSiteFilter] = useState<'all' | string>('all');
   const [open, setOpen] = useState<string | null>(null);
+  const [coachOpen, setCoachOpen] = useState<string | null>(null);
   const [newCoach, setNewCoach] = useState('');
   const [newCoachSite, setNewCoachSite] = useState(SITES[0].id);
   const [rom, setRom] = useState<Record<string, number>>({});
@@ -288,7 +290,11 @@ export default function Admin() {
               <TableHead><TableRow><TableCell>Coach</TableCell><TableCell>Title</TableCell><TableCell align="right">Sessions</TableCell></TableRow></TableHead>
               <TableBody>
                 {perCoach.map((c: any) => (
-                  <TableRow key={c.id}><TableCell>{c.name}</TableCell><TableCell><Typography variant="body2" color="text.secondary">{c.title}</Typography></TableCell><TableCell align="right">{c.sessions}</TableCell></TableRow>
+                  <TableRow key={c.id} hover sx={{ cursor: 'pointer' }} onClick={() => setCoachOpen(c.id)}>
+                    <TableCell>{c.name}</TableCell>
+                    <TableCell><Typography variant="body2" color="text.secondary">{c.title}</Typography></TableCell>
+                    <TableCell align="right">{c.sessions}</TableCell>
+                  </TableRow>
                 ))}
               </TableBody>
             </Table>
@@ -465,11 +471,61 @@ export default function Admin() {
     );
   };
 
+  /** Coach detail — profile plus session history (item 4: clicking a coach in
+   * Roster used to do nothing beyond the row itself). `snap` is unscoped
+   * (Admin sees every studio), so filtering by coachId is enough. */
+  const renderCoachDrawer = () => {
+    const c = snap.coaches.find((x: any) => x.id === coachOpen);
+    if (!c) return null;
+    const coachSessions = snap.sessions.filter((s: any) => s.coachId === c.id);
+    return (
+      <Drawer anchor="right" open onClose={() => setCoachOpen(null)} slotProps={{ paper: { sx: { width: { xs: '100%', sm: 420 }, p: 3 } } }}>
+        <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <Box>
+            <Typography variant="overline" color="text.secondary">{siteById(c.siteId)?.name ?? c.siteId}</Typography>
+            <Typography variant="h4">{c.name}</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{c.title}</Typography>
+          </Box>
+          <IconButton onClick={() => setCoachOpen(null)} aria-label="Close coach"><CloseIcon /></IconButton>
+        </Stack>
+
+        <Stack direction="row" spacing={3} sx={{ mt: 2 }}>
+          <Box><Typography variant="overline" color="text.secondary">Sessions</Typography><Typography variant="readout" sx={{ fontSize: 22 }}>{coachSessions.length}</Typography></Box>
+          <Box><Typography variant="overline" color="text.secondary">Avg RPE</Typography>
+            <Typography variant="readout" sx={{ fontSize: 22 }}>{coachSessions.length ? (coachSessions.reduce((a: number, b: any) => a + b.rpe, 0) / coachSessions.length).toFixed(1) : '—'}</Typography></Box>
+          <Box><Typography variant="overline" color="text.secondary">Avg pain drop</Typography>
+            <Typography variant="readout" sx={{ fontSize: 22 }}>{coachSessions.length ? (coachSessions.reduce((a: number, b: any) => a + (b.painBefore - b.painAfter), 0) / coachSessions.length).toFixed(1) : '—'}</Typography></Box>
+        </Stack>
+
+        <Paper variant="outlined" sx={{ p: 2, mt: 3 }}>
+          <Typography variant="overline" color="text.secondary">History · {coachSessions.length} sessions</Typography>
+          <Stack spacing={1.5} sx={{ mt: 1.5 }}>
+            {coachSessions.length ? coachSessions.slice(0, 15).map((s: any) => (
+              <Box key={s.id} sx={{ p: 1.5, borderRadius: 1, bgcolor: 'action.hover' }}>
+                <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
+                  <Typography variant="body2" sx={{ fontWeight: 600 }}>{s.completedAt} · {s.mins} min</Typography>
+                  <Typography variant="caption" color="text.secondary">{memberOf(s.memberId)?.name ?? 'Member'} · RPE {s.rpe} · pain {s.painBefore}→{s.painAfter}</Typography>
+                </Stack>
+                {s.coachNotes && <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{s.coachNotes}</Typography>}
+              </Box>
+            )) : <Typography variant="body2" color="text.secondary">No sessions logged yet.</Typography>}
+          </Stack>
+        </Paper>
+      </Drawer>
+    );
+  };
+
   const siteLabel = siteFilter === 'all' ? 'All studios' : SITES.find((s) => s.id === siteFilter)?.name ?? siteFilter;
 
   return (
     <Chrome current="admin" currentId="admin" label={`${siteLabel} — admin`} snap={snap} refresh={refresh} msg={msg}>
-      <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper' }}>
+      <Box
+        sx={{
+          position: 'sticky', top: 'var(--marn-header-offset, 0px)', zIndex: (t) => t.zIndex.appBar,
+          borderBottom: 1, borderColor: 'divider',
+          bgcolor: (t) => alpha(t.palette.background.default, 0.86), backdropFilter: 'blur(12px)',
+        }}
+      >
         <Container maxWidth="lg">
           <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1, pt: 1.5 }}>
             <Tabs value={view} onChange={(_, v) => setView(v)}>
@@ -485,15 +541,18 @@ export default function Admin() {
           </Stack>
         </Container>
       </Box>
-      <Fade in key={view} timeout={220}>
-        <Box>
-          {view === 'overview' && renderOverview()}
-          {view === 'roster' && renderRoster()}
-          {view === 'members' && renderMembers()}
-          {view === 'earnings' && renderEarnings()}
-        </Box>
-      </Fade>
+      <AmbientWash tab="admin">
+        <Fade in key={view} timeout={220}>
+          <Box>
+            {view === 'overview' && renderOverview()}
+            {view === 'roster' && renderRoster()}
+            {view === 'members' && renderMembers()}
+            {view === 'earnings' && renderEarnings()}
+          </Box>
+        </Fade>
+      </AmbientWash>
       {open && renderDrawer()}
+      {coachOpen && renderCoachDrawer()}
     </Chrome>
   );
 }

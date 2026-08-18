@@ -57,10 +57,15 @@ export default function Gate() {
 
   if (!dir) return <GateSkeleton />;
 
+  /* router.refresh() invalidates Next's client-side back/forward cache for
+     this page (see Chrome.tsx's openAs for the full explanation) — without
+     it, the browser's back button from e.g. /member could restore the
+     pre-login snapshot of "/" instead of asking the server again. */
   const openAs = async (kind: Category | 'admin', id: string) => {
     await fetch('/api/session', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ kind, id }),
     });
+    router.refresh();
     router.push(kind === 'member' ? '/member' : kind === 'coach' ? '/coach' : kind === 'manager' ? '/manager' : '/admin');
   };
 
@@ -144,7 +149,10 @@ export default function Gate() {
 
                 <PremiumCard sx={{ p: 2.5 }}>
                   <Stack spacing={1.5}>
-                    <ToggleButtonGroup size="small" exclusive value={siteFilter} onChange={(_, v) => v && setSiteFilter(v)} sx={{ flexWrap: 'wrap' }}>
+                    <ToggleButtonGroup
+                      size="small" exclusive value={siteFilter} onChange={(_, v) => v && setSiteFilter(v)}
+                      sx={{ flexWrap: 'wrap', borderRadius: (t) => `${t.marn.radius.lg}px` }}
+                    >
                       <ToggleButton value="all">All studios</ToggleButton>
                       {SITES.map((s) => <ToggleButton key={s.id} value={s.id}>{s.name.replace('Marn — ', '')}</ToggleButton>)}
                     </ToggleButtonGroup>

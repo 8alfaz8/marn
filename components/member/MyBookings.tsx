@@ -24,8 +24,70 @@ function willRefund(date: string, time: string): boolean {
   return (target.getTime() - Date.now()) / (1000 * 60 * 60) >= CANCELLATION_NOTICE_HOURS;
 }
 
-/* Module-scope per CLAUDE.md's known trap. */
-export default function MyBookings({ bookings, onChanged }: { bookings: OwnBooking[]; onChanged: () => void }) {
+/* One booking row — upcoming and past sections render the same shape.
+   Module scope per CLAUDE.md's known trap. */
+function BookingRow({
+  booking,
+  confirming,
+  busy,
+  onConfirm,
+  onCancelClick,
+  onCancelCancel,
+}: {
+  booking: OwnBooking;
+  confirming: boolean;
+  busy: boolean;
+  onConfirm: () => void;
+  onCancelClick: () => void;
+  onCancelCancel: () => void;
+}) {
+  return (
+    <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+      <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
+        <Typography variant="body1">{booking.date} · {booking.time}</Typography>
+        <Typography variant="body2" color="text.secondary">
+          {serviceById(booking.serviceId)?.name ?? booking.serviceId}
+        </Typography>
+        <Chip size="small" variant="outlined" label={copy.myBookings.status[booking.status] ?? booking.status} />
+      </Stack>
+      {ACTIVE.has(booking.status) && (
+        <Box sx={{ mt: 1 }}>
+          {confirming ? (
+            <Collapse in>
+              <Stack spacing={1}>
+                <Typography variant="body2">
+                  {willRefund(booking.date, booking.time) ? copy.myBookings.cancelConfirmRefund : copy.myBookings.cancelConfirmForfeit}
+                </Typography>
+                <Stack direction="row" spacing={1}>
+                  <Button size="small" variant="contained" disabled={busy} onClick={onConfirm}>
+                    {copy.myBookings.cancelYes}
+                  </Button>
+                  <Button size="small" onClick={onCancelCancel}>{copy.myBookings.cancelNo}</Button>
+                </Stack>
+              </Stack>
+            </Collapse>
+          ) : (
+            <Button size="small" onClick={onCancelClick}>{copy.myBookings.cancel}</Button>
+          )}
+        </Box>
+      )}
+    </Box>
+  );
+}
+
+/* Product owner (batch UI/UX review, 2026-08-19): upcoming bookings on top,
+   a "Book a session" action, then past sessions below — not one
+   newest-date-first list mixing both. Module-scope per CLAUDE.md's known
+   trap. */
+export default function MyBookings({
+  bookings,
+  onChanged,
+  onGoToBook,
+}: {
+  bookings: OwnBooking[];
+  onChanged: () => void;
+  onGoToBook: () => void;
+}) {
   const [confirming, setConfirming] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -46,46 +108,50 @@ export default function MyBookings({ bookings, onChanged }: { bookings: OwnBooki
     }
   };
 
+  // `bookings` arrives newest-date-first (getMemberOwnBookings). Upcoming
+  // (active status) shows soonest-first instead — the opposite ordering —
+  // past (everything else) keeps the most-recent-first order it already has.
+  const upcoming = bookings
+    .filter((b) => ACTIVE.has(b.status))
+    .sort((a, b) => `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`));
+  const past = bookings.filter((b) => !ACTIVE.has(b.status));
+
+  const rowProps = (b: OwnBooking) => ({
+    booking: b,
+    confirming: confirming === b.id,
+    busy,
+    onConfirm: () => onCancel(b.id),
+    onCancelClick: () => setConfirming(b.id),
+    onCancelCancel: () => setConfirming(null),
+  });
+
   return (
     <Stack spacing={2} sx={{ maxWidth: 560 }}>
       <Typography variant="h6">{copy.myBookings.heading}</Typography>
       {error && <Alert severity="error">{error}</Alert>}
       {message && <Alert severity="success">{message}</Alert>}
-      {bookings.length === 0 && (
-        <Typography variant="body2" color="text.secondary">{copy.myBookings.empty}</Typography>
-      )}
-      {bookings.map((b) => (
-        <Box key={b.id} sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-          <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
-            <Typography variant="body1">{b.date} · {b.time}</Typography>
-            <Typography variant="body2" color="text.secondary">
-              {serviceById(b.serviceId)?.name ?? b.serviceId}
-            </Typography>
-            <Chip size="small" variant="outlined" label={copy.myBookings.status[b.status] ?? b.status} />
-          </Stack>
-          {ACTIVE.has(b.status) && (
-            <Box sx={{ mt: 1 }}>
-              {confirming === b.id ? (
-                <Collapse in>
-                  <Stack spacing={1}>
-                    <Typography variant="body2">
-                      {willRefund(b.date, b.time) ? copy.myBookings.cancelConfirmRefund : copy.myBookings.cancelConfirmForfeit}
-                    </Typography>
-                    <Stack direction="row" spacing={1}>
-                      <Button size="small" variant="contained" disabled={busy} onClick={() => onCancel(b.id)}>
-                        {copy.myBookings.cancelYes}
-                      </Button>
-                      <Button size="small" onClick={() => setConfirming(null)}>{copy.myBookings.cancelNo}</Button>
-                    </Stack>
-                  </Stack>
-                </Collapse>
-              ) : (
-                <Button size="small" onClick={() => setConfirming(b.id)}>{copy.myBookings.cancel}</Button>
-              )}
-            </Box>
-          )}
-        </Box>
-      ))}
+
+      <Stack spacing={1.5}>
+        <Typography variant="overline" color="text.secondary">{copy.myBookings.upcomingHeading}</Typography>
+        {upcoming.length === 0 ? (
+          <Typography variant="body2" color="text.secondary">{copy.myBookings.noUpcoming}</Typography>
+        ) : (
+          upcoming.map((b) => <BookingRow key={b.id} {...rowProps(b)} />)
+        )}
+      </Stack>
+
+      <Box>
+        <Button variant="contained" onClick={onGoToBook}>{copy.myBookings.bookAction}</Button>
+      </Box>
+
+      <Stack spacing={1.5}>
+        <Typography variant="overline" color="text.secondary">{copy.myBookings.pastHeading}</Typography>
+        {past.length === 0 ? (
+          <Typography variant="body2" color="text.secondary">{copy.myBookings.noPast}</Typography>
+        ) : (
+          past.map((b) => <BookingRow key={b.id} {...rowProps(b)} />)
+        )}
+      </Stack>
     </Stack>
   );
 }

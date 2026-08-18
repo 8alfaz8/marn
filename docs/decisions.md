@@ -14,6 +14,53 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-19 — Batch UI/UX review: cross-site booking + open roster, plus nine other fixes
+
+**Change:** product-owner UI/UX findings against the running app, implemented across both trees (see
+`prototype/decisions.md` for the prototype-side entry). At root: (1) `lib/authz.ts`'s
+`assertMemberInScope` dropped the `member.siteId !== session.siteId` gate and the coach-specific
+booking/session/screened-by-me narrowing that used to sit under it — any active coach or studio
+manager can now open any member's record, any site ("open roster," `docs/adr/0018` point 3); (2)
+booking is fully decoupled from a member's home site — `getMemberAvailability`/
+`getActiveCoachesAtSite`/`createSelfBooking` (`lib/actions/bookings.ts`) take a server-validated
+`siteId` instead of trusting `session.siteId`, `BookingForm.tsx` gained a studio picker,
+`getMemberBookingHistory`'s now-contradictory site filter was removed; (3) `getCoachMembers`'s
+roster query split into two differently-filtered branches — the booking/session tie is now
+company-wide (a booking can be anywhere), the not-yet-screened branch stays site-filtered (screening
+is physical, in-person; open roster already covers ad-hoc access, this is only about what shows in
+the queue by default); (4) `getManagerMembers` gained an optional `siteId` param, defaulted to the
+caller's own site, same UX-not-security reasoning; (5) `getSites()` widened from superadmin-only to
+any staff (id/name/city only, needed for the new site-filter dropdowns, nothing sensitive to gate
+further); (6) a new `getCoachSessionHistory` + shared `CoachSessionHistoryDialog`, wired into both
+the superadmin coach-workload table and the studio staff roster; (7) `theme.marn.ambientWash` (token
+values already existed, undocumented as unused) got its first real consumer — a new shared
+`AmbientWash` component wrapping `StaffChrome`'s and `MemberConsole`'s content; (8) a new shared
+`CollapsibleTopBar` (collapsed-by-default floating toggle, `localStorage`-persisted) replaces the
+always-expanded `AppBar` in `StaffChrome`/`MemberChrome`, exposing a `useTopBarOffset()` context so
+each console's tab bar can dock `position: sticky` under it; (9) `MyBookings.tsx` reordered to
+upcoming-then-past; (10) `ProgramTab.tsx` gained a CSS-drawn (no new icon dependency) play-triangle
+thumbnail per prescribed move.
+
+**Why:** ADR 0018 records the two decisions with real trade-offs (open roster, cross-site booking) in
+full — quizzed directly with the product owner before implementation, not inferred. The remaining
+items are straightforward UI/UX fixes traced to concrete gaps, several already correct at root before
+this pass (coach booking-approval was already studio-manager-only; no `MuiToggleButtonGroup`
+wrap-overlap bug exists here since root's bookings use `TextField select`, not wrapping toggle
+buttons) — verified rather than assumed identical to the prototype's bugs.
+
+**Trade-off accepted:** open roster is a real reduction in defense-in-depth (see `docs/adr/0018`'s
+Consequences) — accepted deliberately by the product owner, not a default chosen unilaterally. Item
+7 (Progress/scores history) surfaced a real gap while implementing: root has no `scoreDays`-equivalent
+table, so Mobility/Recovery trend history (built for the prototype the same pass) isn't buildable at
+root without new schema — flagged in `docs/architecture/overview.md`'s deviations rather than faked.
+Root-tree verification for this pass is `tsc`/`build`-only, not browser-driven: the authenticated
+flows this change touches (booking, roster, coach detail) all sit behind real `better-auth` sessions
+against the live Neon dev database, and per standing instruction Neon isn't touched — including via
+normal login/registration — without asking first; that check is still open, flagged for the user
+rather than skipped silently.
+
+---
+
 ## 2026-08-12 — Completing Phase 2: credit ledger, programmes, check-in, notifications, cancellation policy, mobile app
 
 **Change:** everything remaining in blueprint Phase 2 except the full

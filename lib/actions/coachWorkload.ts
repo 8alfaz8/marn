@@ -1,8 +1,8 @@
 'use server';
 
-import { and, eq, gte, inArray, lte } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, lte } from 'drizzle-orm';
 import { db, schema } from '@/db';
-import { requireStudioManagerOrSuperadmin } from '@/lib/authz';
+import { ForbiddenError, requireStudioManagerOrSuperadmin } from '@/lib/authz';
 import { serviceById } from '@/lib/reference';
 import { timeToMinutes } from '@/lib/scheduling';
 
@@ -73,4 +73,42 @@ export async function getCoachWorkload(siteId?: string) {
       sessionsLast7d: pastSessions.filter((s) => s.coachId === coach.id).length,
     };
   });
+}
+
+/**
+ * A coach's own session history — the click-through from the workload/staff
+ * list (item #4, superadmin console, and the studio manager's own staff
+ * list for consistency). Same scoping as `getCoachWorkload`: a studio
+ * manager only sees a coach at their own site, a superadmin sees any coach.
+ * Unrelated to `docs/adr/0018`'s open member roster — this is staff-to-staff
+ * visibility (who worked with whom), not member data access.
+ */
+export async function getCoachSessionHistory(coachId: string) {
+  const session = await requireStudioManagerOrSuperadmin();
+  const [coach] = await db
+    .select({ id: schema.staff.id, name: schema.staff.name, siteId: schema.staff.siteId, role: schema.staff.role })
+    .from(schema.staff)
+    .where(eq(schema.staff.id, coachId))
+    .limit(1);
+  if (!coach || coach.role !== 'coach') throw new ForbiddenError('Coach not found');
+  if (session.role === 'studio_manager' && coach.siteId !== session.siteId) {
+    throw new ForbiddenError('Coach not at your site');
+  }
+
+  return db
+    .select({
+      id: schema.sessions.id,
+      memberId: schema.sessions.memberId,
+      memberName: schema.members.name,
+      completedAt: schema.sessions.completedAt,
+      mins: schema.sessions.mins,
+      painBefore: schema.sessions.painBefore,
+      painAfter: schema.sessions.painAfter,
+      memberSummary: schema.sessions.memberSummary,
+    })
+    .from(schema.sessions)
+    .innerJoin(schema.members, eq(schema.members.id, schema.sessions.memberId))
+    .where(eq(schema.sessions.coachId, coachId))
+    .orderBy(desc(schema.sessions.completedAt))
+    .limit(50);
 }

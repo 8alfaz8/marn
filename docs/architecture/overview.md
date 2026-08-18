@@ -221,6 +221,39 @@ Deliberately scoped out of this pass, agreed with the user before building
   not retired.** It's still how a staff-added member (no login) sees their
   data; real member auth is additive, not a replacement, this pass.
 
+## Batch UI/UX review (2026-08-19): cross-site booking, open roster, twelve other fixes
+
+Thirteen product-owner UI/UX findings against the running app (screenshots of
+the prototype), implemented across both trees in one pass — full writeups in
+`docs/decisions.md` (root) and `prototype/decisions.md`; call-chain detail in
+`docs/flow.md` and `prototype/flow.md`. Two items constrained the future
+enough to get their own ADR: `docs/adr/0018-cross-site-booking-and-open-roster.md`
+(members can book any studio; root's `assertMemberInScope` drops all
+per-site/per-coach narrowing — "open roster," a real, deliberate reduction in
+defense-in-depth, quizzed directly with the product owner before building).
+
+| Module | Code path | Status |
+|---|---|---|
+| Booking & scheduling | `lib/actions/bookings.ts` (root), `app/api/[...path]/route.ts` (prototype) | **done** — booking decoupled from a member's home site at both trees; root's `getMemberBookingHistory` no longer site-filters (would silently contradict open roster) |
+| Authorization layer | `lib/authz.ts` | **done, narrowed** — `assertMemberInScope` is now an exist-check only for staff callers; the coach/session-tie/site narrowing this pass removed is preserved as historical record in `docs/flow.md`'s "Coach: PAR-Q clearance..." entry, not silently dropped |
+| Studio manager console | `components/Manager.tsx` (prototype) | **done** — confirmed as the sole booking-approval path; the coach console's confirm/decline UI removed (prototype only — root's coach console never had it, `docs/adr/0008` already correct there) |
+| Administration / Superadmin | `components/Admin.tsx` (prototype), `components/superadmin/*`, `components/studio/StaffPanel.tsx` (root) | **done** — clicking a coach opens a profile + session-history detail (drawer/dialog) at both trees |
+| Design system | `theme/theme.ts` (both trees), `components/shared/{AmbientWash,CollapsibleTopBar}.tsx` (root, new) | **done** — the root theme's `ambientWash` tokens (present since the design-system token layer landed) got their first real consumer; both trees' top bars collapse to a floating toggle by default, sticky tab bars dock under it |
+| Member app | `components/Member.tsx`, `MemberScreens.tsx` (prototype); `components/member/*` (root) | **in progress** — 5-tab bottom nav (added Body map, Home) at both trees; Sessions/My-bookings reordered (upcoming → Book → past); Progress screen deviation below |
+| Measurement domain | — | **new deviation, root only** — Mobility/Recovery trend history (built for the prototype's Progress screen this pass, `scoreDays`-backed) has no root equivalent: root has no per-day composite-score history table, only current values. Flagged, not faked — `MemberPortal.tsx`'s three scores render with equal visual weight as the achievable partial fix; a `scoreDays`-shaped table for root is a real gap for a future pass, not silently deferred |
+
+**Verification, honestly stated:** the prototype tree is fully browser-verified
+this pass (Playwright, throwaway/no-auth demo data — screenshots confirmed the
+oval-overlap fix, the contrast fix, the 5-tab nav, the studio picker, the
+coach-detail drawer, and the "awaiting studio manager approval" state all
+render correctly with zero client-side console errors). **The root tree is
+`tsc`/`build`-verified only, not browser-verified** — the authenticated flows
+this pass touches (self-service booking, staff rosters, coach detail) sit
+behind real `better-auth` sessions against the live Neon dev database, and
+per standing instruction Neon isn't touched, including via normal
+login/registration, without asking first. That's an open item for the user
+to either verify directly or explicitly clear for a throwaway-account check.
+
 ## Deviations from the blueprint, by module
 
 **Member app**

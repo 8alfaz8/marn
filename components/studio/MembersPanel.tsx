@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Alert from '@mui/material/Alert';
 import Button from '@mui/material/Button';
 import Grid from '@mui/material/Grid';
+import MenuItem from '@mui/material/MenuItem';
 import Snackbar from '@mui/material/Snackbar';
 import Stack from '@mui/material/Stack';
 import Table from '@mui/material/Table';
@@ -13,21 +14,46 @@ import TableContainer from '@mui/material/TableContainer';
 import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import TextField from '@mui/material/TextField';
-import { createMember } from '@/lib/actions/members';
+import { createMember, getManagerMembers } from '@/lib/actions/members';
 import { copy } from './copy';
 import MemberDetailDrawer from './MemberDetailDrawer';
 import { EmptyState, SectionCard, formatDay, useFormSubmit } from './primitives';
-import type { Member } from './types';
+import type { Member, Site } from './types';
 
 /* Roster and contact details, plus (docs/adr/0008: a studio manager is
    unrestricted at their site, unlike a coach) a drill-in to session history,
-   measurements, and booking/charge history via MemberDetailDrawer. */
-export default function MembersPanel({ members }: { members: Member[] }) {
+   measurements, and booking/charge history via MemberDetailDrawer.
+   `ownSiteId`/`sites` back the site filter (`docs/adr/0018` point 5) —
+   open roster means a manager can already open any member's record, this
+   only controls which site's roster shows by default. */
+export default function MembersPanel({ members, sites, ownSiteId }: { members: Member[]; sites: Site[]; ownSiteId: string }) {
   const { pending, error, notice, setError, setNotice, run } = useFormSubmit();
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [selected, setSelected] = useState<Member | null>(null);
+  const [siteId, setSiteId] = useState(ownSiteId);
+  // Only holds a fetched roster when viewing a *different* site — the
+  // default (own-site) view renders the `members` prop directly, so it
+  // stays live across every `router.refresh()` (e.g. after adding a
+  // member) instead of going stale behind a one-time-initialized copy.
+  const [otherSiteRoster, setOtherSiteRoster] = useState<Member[] | null>(null);
+  const [rosterLoading, setRosterLoading] = useState(false);
+  const roster = siteId === ownSiteId ? members : (otherSiteRoster ?? []);
+
+  const onSiteChange = async (nextSiteId: string) => {
+    setSiteId(nextSiteId);
+    if (nextSiteId === ownSiteId) {
+      setOtherSiteRoster(null);
+      return;
+    }
+    setRosterLoading(true);
+    try {
+      setOtherSiteRoster(await getManagerMembers(nextSiteId));
+    } finally {
+      setRosterLoading(false);
+    }
+  };
 
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -52,7 +78,22 @@ export default function MembersPanel({ members }: { members: Member[] }) {
       <Grid container spacing={3}>
         <Grid size={{ xs: 12, lg: 8 }}>
           <SectionCard title={copy.members.heading} subtitle={copy.members.subtitle}>
-            {members.length === 0 ? (
+            <TextField
+              select
+              size="small"
+              label={copy.members.siteFilter}
+              value={siteId}
+              onChange={(e) => void onSiteChange(e.target.value)}
+              disabled={rosterLoading}
+              sx={{ maxWidth: 260 }}
+            >
+              {sites.map((s) => (
+                <MenuItem key={s.id} value={s.id}>
+                  {s.name}
+                </MenuItem>
+              ))}
+            </TextField>
+            {roster.length === 0 ? (
               <EmptyState message={copy.members.empty} />
             ) : (
               <TableContainer>
@@ -67,7 +108,7 @@ export default function MembersPanel({ members }: { members: Member[] }) {
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {members.map((member) => (
+                    {roster.map((member) => (
                       <TableRow key={member.id} hover>
                         <TableCell>{member.name}</TableCell>
                         <TableCell>{member.phone}</TableCell>

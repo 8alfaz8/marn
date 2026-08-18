@@ -1,14 +1,26 @@
 'use server';
 
 import { randomUUID } from 'crypto';
-import { eq, and, or, desc, inArray, isNull } from 'drizzle-orm';
+import { eq, and, desc, inArray, isNull } from 'drizzle-orm';
 import { db, schema } from '@/db';
 import { requireStaff, requireStudioManager, assertMemberInScope } from '@/lib/authz';
 import { logAudit } from '@/lib/audit';
 
 /** Roster scoped to the coach: members with a booking or session tied to
- *  them, any not-yet-screened member at their site, or a member this coach
- *  most recently PAR-Q screened themselves — never phone/email (docs/adr/0008).
+ *  them anywhere, any not-yet-screened member at their own site, or a
+ *  member this coach most recently PAR-Q screened themselves — never
+ *  phone/email (docs/adr/0008).
+ *
+ *  **Two differently-filtered branches, unioned in JS, not one shared site
+ *  filter** (`docs/adr/0018` point 4, 2026-08-19): a member can now book at
+ *  any studio, so the booking/session/screened-by-me tie no longer implies
+ *  "at this coach's site" — that branch is company-wide. The unscreened
+ *  branch stays site-filtered on purpose: screening happens in person, at
+ *  a physical location, so "every unscreened member in the company" in
+ *  every coach's queue would be noise, not access control — a coach could
+ *  already open any of those records directly via `assertMemberInScope`
+ *  (open roster, same ADR point 3) if they had a reason to. This is a UX
+ *  default for the queue, not a security boundary.
  *
  *  The unscreened branch exists because readiness screening is "completed
  *  with a coach at first visit" (blueprint §4.1.10), and a first-timer has
@@ -22,9 +34,11 @@ import { logAudit } from '@/lib/audit';
  *  from their roster the instant they finish the screening, mid-visit. A
  *  second bug caught via browser-driven verification (`docs/decisions.md`,
  *  2026-08-12), same mismatch as the first: "cleared" isn't the same
- *  moment as "has an ordinary booking/session tie." See the matching fix
- *  in `assertMemberInScope` (`lib/authz.ts`) — this keeps the roster and
- *  the access check agreeing with each other.
+ *  moment as "has an ordinary booking/session tie." `assertMemberInScope`
+ *  (`lib/authz.ts`) no longer needs a matching fix of its own — open
+ *  roster means it doesn't narrow by coach at all any more — but this
+ *  roster query still needs its own screened-by-me branch so the member
+ *  shows up in the list, not just remains individually reachable.
  *
  *  Each row carries `hasOpenFlag` so a coach can see who needs attention
  *  before tapping in (product owner, 2026-08-11: list-level flag visibility). */
@@ -36,7 +50,7 @@ export async function getCoachMembers() {
     db
       .selectDistinct({ id: schema.bookings.memberId })
       .from(schema.bookings)
-      .where(and(eq(schema.bookings.coachId, session.staffId), eq(schema.bookings.siteId, session.siteId))),
+      .where(eq(schema.bookings.coachId, session.staffId)),
     db
       .selectDistinct({ id: schema.sessions.memberId })
       .from(schema.sessions)
@@ -57,18 +71,19 @@ export async function getCoachMembers() {
 
   const assignedIds = [...new Set([...bookingRows.map((r) => r.id), ...sessionRows.map((r) => r.id), ...screenedByMeIds])];
 
-  const members = await db
-    .select({ id: schema.members.id, name: schema.members.name, parqCleared: schema.members.parqCleared })
-    .from(schema.members)
-    .where(
-      and(
-        eq(schema.members.siteId, session.siteId),
-        or(
-          assignedIds.length > 0 ? inArray(schema.members.id, assignedIds) : undefined,
-          eq(schema.members.parqCleared, false),
-        ),
-      ),
-    );
+  const [assignedMembers, unscreenedMembers] = await Promise.all([
+    assignedIds.length > 0
+      ? db
+          .select({ id: schema.members.id, name: schema.members.name, parqCleared: schema.members.parqCleared })
+          .from(schema.members)
+          .where(inArray(schema.members.id, assignedIds))
+      : Promise.resolve([]),
+    db
+      .select({ id: schema.members.id, name: schema.members.name, parqCleared: schema.members.parqCleared })
+      .from(schema.members)
+      .where(and(eq(schema.members.siteId, session.siteId), eq(schema.members.parqCleared, false))),
+  ]);
+  const members = [...new Map([...assignedMembers, ...unscreenedMembers].map((m) => [m.id, m])).values()];
   if (members.length === 0) return [];
 
   const ids = members.map((m) => m.id);
@@ -80,10 +95,15 @@ export async function getCoachMembers() {
   return members.map((m) => ({ ...m, hasOpenFlag: flagged.has(m.id) }));
 }
 
-/** Full roster at the manager's site, contact fields included. */
-export async function getManagerMembers() {
+/** Roster at `siteId` (contact fields included), defaulted to the manager's
+ *  own site if omitted — a UX default, not a security gate: open roster
+ *  (`docs/adr/0018` point 3) already lets a manager open any member's
+ *  record regardless of site, this just controls what the list shows by
+ *  default so it doesn't dump the whole company's roster (point 5). */
+export async function getManagerMembers(siteId?: string) {
   const session = await requireStudioManager();
-  return db.select().from(schema.members).where(eq(schema.members.siteId, session.siteId)).orderBy(schema.members.name);
+  const scopedSiteId = siteId ?? session.siteId;
+  return db.select().from(schema.members).where(eq(schema.members.siteId, scopedSiteId)).orderBy(schema.members.name);
 }
 
 export async function createMember(input: { name: string; phone: string; email?: string }) {

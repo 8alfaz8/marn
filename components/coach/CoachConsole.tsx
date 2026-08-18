@@ -15,6 +15,7 @@ import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import { serviceById } from '@/lib/reference';
 import { getMemberContext } from '@/lib/actions/members';
+import { useTopBarOffset } from '@/components/shared/CollapsibleTopBar';
 import { copy } from './copy';
 import MemberContextPanel from './MemberContextPanel';
 import type { MemberContext, RosterMember, ScheduleBooking } from './types';
@@ -168,6 +169,7 @@ export default function CoachConsole({
   members: RosterMember[];
 }) {
   const router = useRouter();
+  const topBarOffset = useTopBarOffset();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [context, setContext] = useState<MemberContext | null>(null);
   const [loading, setLoading] = useState(false);
@@ -222,7 +224,13 @@ export default function CoachConsole({
       <Grid size={{ xs: 12, md: 4, lg: 3 }}>
         <Stack
           spacing={2}
-          sx={{ position: { md: 'sticky' }, insetBlockStart: (t) => t.spacing(2) }}
+          sx={{
+            position: { md: 'sticky' },
+            // Docks below the collapsible top bar (item #1) at the md+
+            // breakpoint this sticky rail applies at — `.sm` is the right
+            // toolbar height there (md is >= sm).
+            insetBlockStart: (t) => `calc(${topBarOffset === 0 ? '0px' : `${topBarOffset.sm}px`} + ${t.spacing(2)})`,
+          }}
         >
           <ScheduleSection bookings={bookings} nameFor={nameFor} flagFor={flagFor} selectedId={selectedId} onSelect={onSelect} />
           <RosterSection
