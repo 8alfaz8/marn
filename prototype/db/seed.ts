@@ -10,9 +10,11 @@ const {
 
 /* ---------------------------------------------------------------------------
    Seeds three studios' worth of demo data: one manager, four coaches and
-   fifty members per site (`SITES` in lib/reference.ts), all displayed as
-   "Test User (###)" — a single global sequence across managers, coaches and
-   members so every seeded person has a unique, obviously-fake name.
+   fifty members per site (`SITES` in lib/reference.ts). A single running
+   counter (`personNo`) is shared across managers, coaches and members so
+   every seeded person has a unique number regardless of role; managers and
+   coaches get a role-prefixed name ("Manager 001", "Coach 002"), members
+   stay "Test User (###)" — all still obviously-fake, demo-only names.
 
    Members are split into three tiers per site so the range of member
    journeys (empty state, steady progress, long-tenure power user) is real
@@ -92,9 +94,12 @@ export async function seed() {
   await wipe();
 
   /* A single running counter gives every seeded person — manager, coach or
-     member, any site — a unique "Test User (###)" display name. */
+     member, any site — a unique display name. Managers and coaches get a
+     role-prefixed name ("Manager 001", "Coach 002") so they read as staff at
+     a glance instead of blending into the member list's "Test User (###)". */
   let personNo = 0;
   const nextName = () => `Test User (${pad3(++personNo)})`;
+  const nextRoleName = (role: string) => `${role} ${pad3(++personNo)}`;
 
   const mgrRows: any[] = [];
   const coachRows: any[] = [];
@@ -117,7 +122,7 @@ export async function seed() {
 
   for (const site of SITES) {
     /* ---- manager ---------------------------------------------------- */
-    const mgrName = nextName();
+    const mgrName = nextRoleName('Manager');
     const mgrId = `mg_${site.id}`;
     mgrRows.push({
       id: mgrId, name: mgrName,
@@ -128,7 +133,7 @@ export async function seed() {
     /* ---- coaches + shifts -------------------------------------------- */
     const siteCoachIds: string[] = [];
     for (let ci = 1; ci <= COACHES_PER_SITE; ci++) {
-      const name = nextName();
+      const name = nextRoleName('Coach');
       const id = `c_${site.id}_${ci}`;
       siteCoachIds.push(id);
       coachRows.push({

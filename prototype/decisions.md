@@ -23,6 +23,24 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-19 — Role-prefixed demo names for managers and coaches
+
+**Change:** `db/seed.ts`'s naming — previously every seeded person (manager, coach, member) shared
+one `"Test User (###)"` template off a single global counter. Managers and coaches now get
+`nextRoleName('Manager' | 'Coach')` → `"Manager 001"`, `"Coach 002"`, still drawing from the same
+shared counter for uniqueness. Members are unchanged (`"Test User (###)"`).
+
+**Why:** Staff and members were visually indistinguishable in any list showing both ("Test User"
+everywhere) — a manager scanning the coach roster or a member's assigned-coach field couldn't tell
+staff from members at a glance. Checked every render path for coach/manager names (Gate's person
+picker, Chrome's top-bar label, Manager/Admin/Coach lists) — all already render the full `name`
+field with no truncation, so this is a pure data-template change, no component changes needed.
+
+**Trade-off accepted:** Takes effect only after the next `npm run db:seed`; existing demo data
+keeps its old "Test User (###)" names for managers/coaches until reseeded.
+
+---
+
 ## 2026-08-18 — Light/dark toggle (light default, neutral black/white), real loading skeletons, paginated members list
 
 **Change:** Three separate pieces of feedback, addressed together:
